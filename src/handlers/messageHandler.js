@@ -4,10 +4,15 @@
  */
 
 const OpenAI = require('openai');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
-// Initialize OpenAI client
+// Configure proxy if available
+const proxyAgent = process.env.https_proxy ? new HttpsProxyAgent(process.env.https_proxy) : undefined;
+
+// Initialize OpenAI client with proxy support
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
+    apiKey: process.env.OPENAI_API_KEY,
+    httpAgent: proxyAgent
 });
 
 // Store conversation history per chat (in-memory, resets on restart)
