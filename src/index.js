@@ -24,6 +24,10 @@ if (process.env.https_proxy) {
 
 const api = axios.create(axiosConfig);
 
+// Message buffer for debouncing - collects rapid messages before responding
+const messageBuffer = new Map(); // chatId -> { messages: [], senderName: string, timer: timeout }
+const DEBOUNCE_DELAY = 2000; // Wait 2 seconds for additional messages
+
 // Build API URL
 function buildUrl(method) {
     return `${API_HOST}/waInstance${ID_INSTANCE}/${method}/${API_TOKEN_INSTANCE}`;
@@ -134,10 +138,49 @@ async function processNotification(body) {
 
             console.log(`[${new Date().toISOString()}] Message from ${senderName} (${chatId}): ${messageText}`);
 
-            // Handle the message
-            await handleMessage(restAPI, chatId, messageText, senderName);
+            // Add message to buffer and debounce
+            bufferMessage(chatId, messageText, senderName);
         }
     }
+}
+
+// Buffer messages and debounce before processing
+function bufferMessage(chatId, messageText, senderName) {
+    // Get or create buffer entry for this chat
+    let bufferEntry = messageBuffer.get(chatId);
+
+    if (bufferEntry) {
+        // Clear existing timer
+        clearTimeout(bufferEntry.timer);
+        // Add message to buffer
+        bufferEntry.messages.push(messageText);
+    } else {
+        // Create new buffer entry
+        bufferEntry = {
+            messages: [messageText],
+            senderName: senderName
+        };
+        messageBuffer.set(chatId, bufferEntry);
+    }
+
+    // Set new timer to process messages after delay
+    bufferEntry.timer = setTimeout(async () => {
+        const entry = messageBuffer.get(chatId);
+        if (entry) {
+            messageBuffer.delete(chatId);
+
+            // Combine all messages into one
+            const combinedMessage = entry.messages.join(' ');
+            console.log(`[${new Date().toISOString()}] Processing combined message: ${combinedMessage}`);
+
+            // Handle the combined message
+            try {
+                await handleMessage(restAPI, chatId, combinedMessage, entry.senderName);
+            } catch (error) {
+                console.error('Error handling message:', error);
+            }
+        }
+    }, DEBOUNCE_DELAY);
 }
 
 // Graceful shutdown
