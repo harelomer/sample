@@ -1,0 +1,51 @@
+# Docker Compose for local development
+# AI-Powered Property Management Communication System
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./property_management.db
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GREEN_API_INSTANCE_ID=${GREEN_API_INSTANCE_ID}
+      - GREEN_API_TOKEN=${GREEN_API_TOKEN}
+      - DEBUG=true
+    volumes:
+      - ./app:/app/app:ro
+      - sqlite_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: PostgreSQL for production-like local development
+  postgres:
+    image: postgres:15-alpine
+    profiles:
+      - postgres
+    environment:
+      - POSTGRES_USER=property_mgmt
+      - POSTGRES_PASSWORD=property_mgmt_password
+      - POSTGRES_DB=property_management
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U property_mgmt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  sqlite_data:
+  postgres_data:
