@@ -3,17 +3,22 @@
  * Processes incoming WhatsApp messages using OpenAI
  */
 
-const OpenAI = require('openai');
+const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
-// Configure proxy if available
-const proxyAgent = process.env.https_proxy ? new HttpsProxyAgent(process.env.https_proxy) : undefined;
+// Configure axios with proxy if available
+const axiosConfig = {
+    headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+    }
+};
+if (process.env.https_proxy) {
+    axiosConfig.httpsAgent = new HttpsProxyAgent(process.env.https_proxy);
+    axiosConfig.proxy = false;
+}
 
-// Initialize OpenAI client with proxy support
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    httpAgent: proxyAgent
-});
+const openaiApi = axios.create(axiosConfig);
 
 // Store conversation history per chat (in-memory, resets on restart)
 const conversationHistory = new Map();
@@ -54,7 +59,7 @@ async function sendMessage(restAPI, chatId, message) {
 }
 
 /**
- * Get AI response from OpenAI
+ * Get AI response from OpenAI using direct API call
  */
 async function getAIResponse(chatId, userMessage, senderName) {
     // Get or create conversation history for this chat
@@ -75,7 +80,7 @@ async function getAIResponse(chatId, userMessage, senderName) {
     }
 
     try {
-        const response = await openai.chat.completions.create({
+        const response = await openaiApi.post('https://api.openai.com/v1/chat/completions', {
             model: 'gpt-4o-mini',
             max_tokens: 1024,
             messages: [
@@ -87,7 +92,7 @@ async function getAIResponse(chatId, userMessage, senderName) {
             ]
         });
 
-        const assistantMessage = response.choices[0].message.content;
+        const assistantMessage = response.data.choices[0].message.content;
 
         // Add assistant response to history
         history.push({
@@ -97,7 +102,7 @@ async function getAIResponse(chatId, userMessage, senderName) {
 
         return assistantMessage;
     } catch (error) {
-        console.error('Error getting AI response:', error);
+        console.error('Error getting AI response:', error.response?.data || error.message);
         return "Sorry, I'm having trouble processing your request right now. Please try again.";
     }
 }
