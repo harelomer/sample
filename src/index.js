@@ -1,4 +1,5 @@
-const whatsAppClient = require('@green-api/whatsapp-api-client');
+const axios = require('axios');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 require('dotenv').config();
 
 const { handleMessage } = require('./handlers/messageHandler');
@@ -6,6 +7,7 @@ const { handleMessage } = require('./handlers/messageHandler');
 // Green-API credentials from environment variables
 const ID_INSTANCE = process.env.GREEN_API_ID_INSTANCE;
 const API_TOKEN_INSTANCE = process.env.GREEN_API_TOKEN_INSTANCE;
+const API_HOST = process.env.GREEN_API_HOST || 'https://api.green-api.com';
 
 if (!ID_INSTANCE || !API_TOKEN_INSTANCE) {
     console.error('Error: GREEN_API_ID_INSTANCE and GREEN_API_TOKEN_INSTANCE must be set in .env file');
@@ -13,11 +15,54 @@ if (!ID_INSTANCE || !API_TOKEN_INSTANCE) {
     process.exit(1);
 }
 
-// Create REST API client for sending messages
-const restAPI = whatsAppClient.restAPI({
-    idInstance: ID_INSTANCE,
-    apiTokenInstance: API_TOKEN_INSTANCE
-});
+// Configure axios with proxy if available
+const axiosConfig = {};
+if (process.env.https_proxy) {
+    axiosConfig.httpsAgent = new HttpsProxyAgent(process.env.https_proxy);
+    axiosConfig.proxy = false;
+}
+
+const api = axios.create(axiosConfig);
+
+// Build API URL
+function buildUrl(method) {
+    return `${API_HOST}/waInstance${ID_INSTANCE}/${method}/${API_TOKEN_INSTANCE}`;
+}
+
+// API wrapper object for compatibility with message handler
+const restAPI = {
+    message: {
+        async sendMessage(chatId, idMessage, message) {
+            const url = buildUrl('sendMessage');
+            const response = await api.post(url, {
+                chatId,
+                message
+            });
+            return response.data;
+        }
+    },
+    instance: {
+        async getStateInstance() {
+            const url = buildUrl('getStateInstance');
+            const response = await api.get(url);
+            return response.data;
+        }
+    }
+};
+
+// Poll for incoming notifications
+async function receiveNotification() {
+    const url = buildUrl('receiveNotification');
+    const response = await api.get(url);
+    return response.data;
+}
+
+// Delete notification after processing
+async function deleteNotification(receiptId) {
+    const url = buildUrl('deleteNotification') + `/${receiptId}`;
+    const response = await api.delete(url);
+    return response.data;
+}
 
 // Start receiving notifications
 async function startBot() {
@@ -37,21 +82,32 @@ async function startBot() {
         console.log('WhatsApp Bot is ready!');
         console.log('Bot is now listening for messages...');
 
-        // Start webhook for receiving messages
-        const webhookAPI = whatsAppClient.webhookAPI(restAPI, async (body) => {
-            try {
-                await processNotification(body);
-            } catch (error) {
-                console.error('Error processing notification:', error);
-            }
-        });
-
-        // Start receiving notifications
-        await webhookAPI.Start();
+        // Start polling for messages
+        pollMessages();
 
     } catch (error) {
         console.error('Error starting bot:', error.message);
         process.exit(1);
+    }
+}
+
+// Poll for new messages
+async function pollMessages() {
+    while (true) {
+        try {
+            const notification = await receiveNotification();
+
+            if (notification) {
+                await processNotification(notification.body);
+                await deleteNotification(notification.receiptId);
+            }
+
+            // Small delay between polls
+            await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+            console.error('Error polling messages:', error.message);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
     }
 }
 
