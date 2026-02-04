@@ -1,12 +1,14 @@
 /**
  * Message Handler Module
- * Processes incoming WhatsApp messages using Claude AI
+ * Processes incoming WhatsApp messages using OpenAI
  */
 
-const Anthropic = require('@anthropic-ai/sdk');
+const OpenAI = require('openai');
 
-// Initialize Anthropic client
-const anthropic = new Anthropic();
+// Initialize OpenAI client
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
 
 // Store conversation history per chat (in-memory, resets on restart)
 const conversationHistory = new Map();
@@ -47,7 +49,7 @@ async function sendMessage(restAPI, chatId, message) {
 }
 
 /**
- * Get AI response from Claude
+ * Get AI response from OpenAI
  */
 async function getAIResponse(chatId, userMessage, senderName) {
     // Get or create conversation history for this chat
@@ -68,14 +70,19 @@ async function getAIResponse(chatId, userMessage, senderName) {
     }
 
     try {
-        const response = await anthropic.messages.create({
-            model: 'claude-sonnet-4-20250514',
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
             max_tokens: 1024,
-            system: `You are a helpful WhatsApp assistant. Keep responses concise and friendly, suitable for chat messages. The user's name is ${senderName}. Use plain text formatting (no markdown) as WhatsApp has limited formatting support. Keep responses brief - ideally under 200 words.`,
-            messages: history
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a helpful WhatsApp assistant. Keep responses concise and friendly, suitable for chat messages. The user's name is ${senderName}. Use plain text formatting (no markdown) as WhatsApp has limited formatting support. Keep responses brief - ideally under 200 words.`
+                },
+                ...history
+            ]
         });
 
-        const assistantMessage = response.content[0].text;
+        const assistantMessage = response.choices[0].message.content;
 
         // Add assistant response to history
         history.push({
@@ -162,7 +169,7 @@ async function sendHelpMessage(restAPI, chatId) {
 async function sendInfoMessage(restAPI, chatId) {
     const infoText = `*WhatsApp AI Chatbot*\n\n` +
         `Version: 2.0.0\n` +
-        `AI: Claude (Anthropic)\n` +
+        `AI: OpenAI GPT-4o-mini\n` +
         `Platform: Green-API\n` +
         `Status: Online\n` +
         `Uptime: ${formatUptime(process.uptime())}`;

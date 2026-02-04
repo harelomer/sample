@@ -19,7 +19,8 @@
     "@anthropic-ai/sdk": "^0.72.1",
     "@green-api/whatsapp-api-client": "^0.4.4",
     "dotenv": "^16.3.1",
-    "https-proxy-agent": "^7.0.6"
+    "https-proxy-agent": "^7.0.6",
+    "openai": "^6.17.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
