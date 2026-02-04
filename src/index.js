@@ -26,7 +26,7 @@ const api = axios.create(axiosConfig);
 
 // Message buffer for debouncing - collects rapid messages before responding
 const messageBuffer = new Map(); // chatId -> { messages: [], senderName: string, timer: timeout }
-const DEBOUNCE_DELAY = 2000; // Wait 2 seconds for additional messages
+const DEBOUNCE_DELAY = 1000; // Wait 1 second for additional messages
 
 // Build API URL
 function buildUrl(method) {
