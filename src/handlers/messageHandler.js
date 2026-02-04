@@ -47,79 +47,92 @@ const jokes = [
 ];
 
 /**
- * Handle incoming messages
- * @param {Client} client - WhatsApp client instance
- * @param {Message} message - Incoming message object
+ * Send a message via Green-API
+ * @param {Object} restAPI - Green-API REST client
+ * @param {string} chatId - Chat ID to send message to
+ * @param {string} message - Message text
  */
-async function handleMessage(client, message) {
-    const chat = await message.getChat();
-    const body = message.body.trim();
+async function sendMessage(restAPI, chatId, message) {
+    try {
+        await restAPI.message.sendMessage(chatId, null, message);
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
+}
 
-    // Log incoming message
-    console.log(`[${new Date().toISOString()}] Message from ${message.from}: ${body}`);
+/**
+ * Handle incoming messages
+ * @param {Object} restAPI - Green-API REST client
+ * @param {string} chatId - Chat ID
+ * @param {string} body - Message body
+ * @param {string} senderName - Sender's name
+ */
+async function handleMessage(restAPI, chatId, body, senderName) {
+    const trimmedBody = body.trim();
 
     // Check if message is a command
-    if (body.startsWith(COMMAND_PREFIX)) {
-        await handleCommand(client, message, body);
+    if (trimmedBody.startsWith(COMMAND_PREFIX)) {
+        await handleCommand(restAPI, chatId, trimmedBody);
         return;
     }
 
     // Handle regular messages with auto-replies
-    await handleAutoReply(client, message, body);
+    await handleAutoReply(restAPI, chatId, trimmedBody, senderName);
 }
 
 /**
  * Handle bot commands
- * @param {Client} client - WhatsApp client instance
- * @param {Message} message - Incoming message object
+ * @param {Object} restAPI - Green-API REST client
+ * @param {string} chatId - Chat ID
  * @param {string} body - Message body
  */
-async function handleCommand(client, message, body) {
+async function handleCommand(restAPI, chatId, body) {
     const args = body.slice(COMMAND_PREFIX.length).trim().split(/\s+/);
     const command = args.shift().toLowerCase();
 
     switch (command) {
         case 'help':
-            await sendHelpMessage(message);
+            await sendHelpMessage(restAPI, chatId);
             break;
 
         case 'ping':
-            await message.reply('Pong! Bot is online and running.');
+            await sendMessage(restAPI, chatId, 'Pong! Bot is online and running.');
             break;
 
         case 'info':
-            await sendInfoMessage(message);
+            await sendInfoMessage(restAPI, chatId);
             break;
 
         case 'echo':
             const echoMessage = args.join(' ');
             if (echoMessage) {
-                await message.reply(echoMessage);
+                await sendMessage(restAPI, chatId, echoMessage);
             } else {
-                await message.reply('Please provide a message to echo. Usage: !echo <message>');
+                await sendMessage(restAPI, chatId, 'Please provide a message to echo. Usage: !echo <message>');
             }
             break;
 
         case 'time':
             const now = new Date();
-            await message.reply(`Current server time: ${now.toLocaleString()}`);
+            await sendMessage(restAPI, chatId, `Current server time: ${now.toLocaleString()}`);
             break;
 
         case 'joke':
             const randomJoke = jokes[Math.floor(Math.random() * jokes.length)];
-            await message.reply(randomJoke);
+            await sendMessage(restAPI, chatId, randomJoke);
             break;
 
         default:
-            await message.reply(`Unknown command: ${command}\nType !help to see available commands.`);
+            await sendMessage(restAPI, chatId, `Unknown command: ${command}\nType !help to see available commands.`);
     }
 }
 
 /**
  * Send help message with available commands
- * @param {Message} message - Incoming message object
+ * @param {Object} restAPI - Green-API REST client
+ * @param {string} chatId - Chat ID
  */
-async function sendHelpMessage(message) {
+async function sendHelpMessage(restAPI, chatId) {
     let helpText = '*WhatsApp Bot Commands*\n\n';
 
     for (const [name, cmd] of Object.entries(commands)) {
@@ -128,59 +141,62 @@ async function sendHelpMessage(message) {
 
     helpText += '_Send any message to get an auto-reply!_';
 
-    await message.reply(helpText);
+    await sendMessage(restAPI, chatId, helpText);
 }
 
 /**
  * Send bot info message
- * @param {Message} message - Incoming message object
+ * @param {Object} restAPI - Green-API REST client
+ * @param {string} chatId - Chat ID
  */
-async function sendInfoMessage(message) {
+async function sendInfoMessage(restAPI, chatId) {
     const infoText = `*WhatsApp Chatbot*\n\n` +
         `Version: 1.0.0\n` +
+        `Platform: Green-API\n` +
         `Status: Online\n` +
         `Uptime: ${formatUptime(process.uptime())}\n\n` +
         `_Type !help to see available commands_`;
 
-    await message.reply(infoText);
+    await sendMessage(restAPI, chatId, infoText);
 }
 
 /**
  * Handle auto-replies for non-command messages
- * @param {Client} client - WhatsApp client instance
- * @param {Message} message - Incoming message object
+ * @param {Object} restAPI - Green-API REST client
+ * @param {string} chatId - Chat ID
  * @param {string} body - Message body
+ * @param {string} senderName - Sender's name
  */
-async function handleAutoReply(client, message, body) {
+async function handleAutoReply(restAPI, chatId, body, senderName) {
     const lowerBody = body.toLowerCase();
 
     // Greeting responses
     if (containsAny(lowerBody, ['hello', 'hi', 'hey', 'hola', 'greetings'])) {
-        await message.reply('Hello! Welcome to the chatbot. Type !help to see what I can do.');
+        await sendMessage(restAPI, chatId, `Hello ${senderName}! Welcome to the chatbot. Type !help to see what I can do.`);
         return;
     }
 
     // Thank you responses
     if (containsAny(lowerBody, ['thank', 'thanks', 'thx'])) {
-        await message.reply("You're welcome! Is there anything else I can help you with?");
+        await sendMessage(restAPI, chatId, "You're welcome! Is there anything else I can help you with?");
         return;
     }
 
     // Goodbye responses
     if (containsAny(lowerBody, ['bye', 'goodbye', 'see you', 'later'])) {
-        await message.reply('Goodbye! Have a great day!');
+        await sendMessage(restAPI, chatId, 'Goodbye! Have a great day!');
         return;
     }
 
     // How are you responses
     if (containsAny(lowerBody, ['how are you', 'how r u', "how's it going"])) {
-        await message.reply("I'm doing great, thanks for asking! How can I help you today?");
+        await sendMessage(restAPI, chatId, "I'm doing great, thanks for asking! How can I help you today?");
         return;
     }
 
     // Default response for unrecognized messages
     // Comment out the line below if you don't want the bot to reply to every message
-    // await message.reply('I received your message. Type !help to see available commands.');
+    // await sendMessage(restAPI, chatId, 'I received your message. Type !help to see available commands.');
 }
 
 /**

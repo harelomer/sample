@@ -1,13 +1,13 @@
 # WhatsApp Chatbot
 
-A simple WhatsApp chatbot built with Node.js and whatsapp-web.js.
+A simple WhatsApp chatbot built with Node.js and Green-API.
 
 ## Features
 
-- QR code authentication
+- Cloud-based WhatsApp API (no browser required)
 - Auto-replies for common greetings
 - Bot commands with `!` prefix
-- Session persistence (no need to scan QR code every time)
+- Easy setup via Green-API console
 - Graceful shutdown handling
 
 ## Available Commands
@@ -26,6 +26,7 @@ A simple WhatsApp chatbot built with Node.js and whatsapp-web.js.
 - Node.js 16 or higher
 - npm or yarn
 - A WhatsApp account
+- Green-API account (free tier available)
 
 ## Installation
 
@@ -40,21 +41,27 @@ A simple WhatsApp chatbot built with Node.js and whatsapp-web.js.
    npm install
    ```
 
-3. Copy the environment file:
+3. Set up Green-API:
+   - Go to https://green-api.com/ and create an account
+   - Create a new instance in the console
+   - Scan the QR code with WhatsApp to link your account
+   - Copy your `idInstance` and `apiTokenInstance`
+
+4. Configure environment variables:
    ```bash
    cp .env.example .env
    ```
 
-4. Start the bot:
+   Edit `.env` and add your Green-API credentials:
+   ```
+   GREEN_API_ID_INSTANCE=your_id_instance
+   GREEN_API_TOKEN_INSTANCE=your_api_token_instance
+   ```
+
+5. Start the bot:
    ```bash
    npm start
    ```
-
-5. Scan the QR code with WhatsApp:
-   - Open WhatsApp on your phone
-   - Go to Settings > Linked Devices
-   - Tap "Link a Device"
-   - Scan the QR code shown in the terminal
 
 ## Development
 
@@ -98,7 +105,7 @@ Edit `src/handlers/messageHandler.js`:
 2. Add a case in the `handleCommand` switch statement:
    ```javascript
    case 'mycommand':
-       await message.reply('This is my custom command response!');
+       await sendMessage(restAPI, chatId, 'This is my custom command response!');
        break;
    ```
 
@@ -106,27 +113,31 @@ Edit `src/handlers/messageHandler.js`:
 
 Edit the `handleAutoReply` function in `src/handlers/messageHandler.js` to add or modify automatic responses.
 
-## Notes
+## Green-API Setup Guide
 
-- The bot uses `LocalAuth` strategy to persist session data in `.wwebjs_auth/` directory
-- First-time authentication requires scanning a QR code
-- Subsequent runs will use the saved session (no QR scan needed)
-- Make sure to keep your session data secure and never commit it to version control
+1. Visit https://console.green-api.com/
+2. Register or log in to your account
+3. Click "Create Instance"
+4. Scan the QR code with WhatsApp (Settings > Linked Devices > Link a Device)
+5. Once linked, copy your credentials from the instance dashboard
+6. Paste them into your `.env` file
 
 ## Troubleshooting
 
-### QR Code Not Showing
-- Make sure your terminal supports displaying characters properly
-- Try running in a different terminal emulator
+### Instance Not Authorized
+- Go to https://console.green-api.com/
+- Check if your instance shows as "authorized"
+- If not, scan the QR code again
 
-### Authentication Failed
-- Delete the `.wwebjs_auth/` directory and try again
-- Make sure WhatsApp Web isn't already connected on another device
+### Bot Not Receiving Messages
+- Verify your credentials are correct in `.env`
+- Check if the instance is active in Green-API console
+- Ensure you're sending messages to the linked WhatsApp number
 
-### Bot Not Responding
-- Check the console for error messages
-- Ensure the bot is showing as "ready" in the logs
-- Verify you're sending messages to the correct WhatsApp number
+### Connection Errors
+- Check your internet connection
+- Verify Green-API service status
+- Ensure your API credentials haven't expired
 
 ## License
 
