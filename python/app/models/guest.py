@@ -62,8 +62,12 @@ class Guest(Base, TimestampMixin):
     def is_currently_staying(self) -> bool:
         """Check if guest is currently at the property."""
         now = datetime.now(timezone.utc)
+        check_in = self.check_in_date.replace(tzinfo=timezone.utc) if self.check_in_date and self.check_in_date.tzinfo is None else self.check_in_date
+        check_out = self.check_out_date.replace(tzinfo=timezone.utc) if self.check_out_date and self.check_out_date.tzinfo is None else self.check_out_date
+        if not check_in or not check_out:
+            return False
         return (
-            self.check_in_date <= now <= self.check_out_date
+            check_in <= now <= check_out
             and self.status == "checked_in"
         )
 

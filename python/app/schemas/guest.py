@@ -18,7 +18,7 @@ class GuestCreate(GuestBase):
     airbnb_thread_id: Optional[str] = None
     whatsapp_chat_id: Optional[str] = None
     property_id: int
-    reservation_id: str
+    reservation_id: Optional[str] = None
     check_in_date: datetime
     check_out_date: datetime
     check_in_time: str = "15:00"
@@ -53,7 +53,7 @@ class GuestResponse(GuestBase):
     airbnb_user_id: Optional[str]
     airbnb_thread_id: Optional[str]
     property_id: int
-    reservation_id: str
+    reservation_id: Optional[str]
     check_in_date: datetime
     check_out_date: datetime
     check_in_time: str

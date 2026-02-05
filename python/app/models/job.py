@@ -107,7 +107,9 @@ class Job(Base, TimestampMixin):
         """Check if job is past its deadline."""
         if not self.deadline:
             return False
-        return datetime.now(timezone.utc) > self.deadline
+        now = datetime.now(timezone.utc)
+        deadline = self.deadline.replace(tzinfo=timezone.utc) if self.deadline.tzinfo is None else self.deadline
+        return now > deadline
 
     def update_status(self, new_status: JobStatus, notes: str = None):
         """Update job status and create history entry."""
@@ -159,7 +161,9 @@ class JobOffer(Base, TimestampMixin):
         """Check if offer has expired."""
         if not self.expires_at:
             return False
-        return datetime.now(timezone.utc) > self.expires_at and self.status == "pending"
+        now = datetime.now(timezone.utc)
+        expires = self.expires_at.replace(tzinfo=timezone.utc) if self.expires_at.tzinfo is None else self.expires_at
+        return now > expires and self.status == "pending"
 
 
 class JobStatusHistory(Base, TimestampMixin):
