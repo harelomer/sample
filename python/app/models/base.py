@@ -28,8 +28,17 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
+        database_url = settings.database_url
+
+        # Convert standard PostgreSQL URL to async format
+        # Render provides postgresql:// but we need postgresql+asyncpg://
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+
         _engine = create_async_engine(
-            settings.database_url,
+            database_url,
             echo=settings.debug,
             future=True
         )
