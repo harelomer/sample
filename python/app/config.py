@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     default_response_timeout_hours: int = 24
     urgent_response_timeout_hours: int = 2
     reminder_interval_hours: int = 2
+    eve_reminder_hour: int = 19  # 7 PM for evening-before job reminders
 
     # Job assignment
     max_assignment_attempts: int = 5

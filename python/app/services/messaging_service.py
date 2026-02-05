@@ -282,6 +282,48 @@ class MessagingService:
 
         return await self.send_to_cleaner(cleaner, message)
 
+    # Eve-of-Job Reminders
+
+    async def send_eve_of_job_reminder(
+        self,
+        cleaner: Any,
+        jobs: list,
+    ) -> Dict[str, Any]:
+        """
+        Send an evening-before reminder for confirmed jobs scheduled tomorrow.
+
+        Args:
+            cleaner: Cleaner model instance
+            jobs: Confirmed jobs scheduled for tomorrow
+
+        Returns:
+            Send result
+        """
+        cleaner_name = cleaner.name.split()[0] if cleaner.name else "Hi"
+
+        if len(jobs) == 1:
+            job = jobs[0]
+            prop_name = job.rental_property.short_name if job.rental_property else "the property"
+            time_str = job.scheduled_time or "your scheduled time"
+            message = (
+                f"Hi {cleaner_name}, just a reminder you have "
+                f"{prop_name} tomorrow at {time_str}. See you there!"
+            )
+        else:
+            job_lines = []
+            for job in jobs:
+                prop_name = job.rental_property.short_name if job.rental_property else "Property"
+                time_str = job.scheduled_time or "TBD"
+                job_lines.append(f"- {prop_name} at {time_str}")
+            jobs_text = "\n".join(job_lines)
+            message = (
+                f"Hi {cleaner_name}, reminder for tomorrow:\n"
+                f"{jobs_text}\n"
+                f"See you there!"
+            )
+
+        return await self.send_to_cleaner(cleaner, message)
+
     # Guest Communication
 
     async def notify_guest_cleaning_status(

@@ -81,6 +81,9 @@ class Job(Base, TimestampMixin):
     notes = Column(Text)  # Manager notes
     cleaner_notes = Column(Text)  # Notes from cleaner
 
+    # Reminders
+    eve_reminder_sent = Column(Boolean, default=False)  # Evening-before reminder sent
+
     # Batch tracking
     batch_id = Column(String(50), index=True)  # Groups jobs sent together
 

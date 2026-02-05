@@ -2084,3 +2084,139 @@ class TestPartialAcceptDateMatching:
         assert offer2.status == "accepted"
         await db.refresh(offer1)
         assert offer1.status == "rejected"
+
+
+# --------------------------------------------------------------------------- #
+# 21. Eve-of-job reminders                                                      #
+# --------------------------------------------------------------------------- #
+
+class TestEveOfJobReminder:
+    """
+    Tests for evening-before reminder for confirmed jobs.
+
+    The scheduler sends a WhatsApp reminder the evening before a confirmed job.
+    """
+
+    @pytest.mark.asyncio
+    async def test_reminder_sent_for_tomorrow_job(self, db, seed, mock_messaging):
+        """Confirmed job scheduled for tomorrow -> reminder sent."""
+        from app.services.scheduler_service import SchedulerService
+
+        cleaner = seed["cleaner_a"]
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        job, offer = await _make_pending_job(db, scheduled_date=tomorrow)
+        # Simulate job being accepted/confirmed
+        job.status = JobStatus.CONFIRMED.value
+        job.assigned_cleaner_id = cleaner.id
+        offer.status = "accepted"
+        await db.flush()
+
+        svc = SchedulerService(db)
+        svc.messaging = mock_messaging
+
+        result = await svc.run_eve_of_job_reminder()
+
+        assert result["reminders_sent"] == 1
+        assert result["cleaners_notified"] == 1
+        mock_messaging.send_eve_of_job_reminder.assert_called_once()
+
+        # Job should be marked as reminded
+        await db.refresh(job)
+        assert job.eve_reminder_sent is True
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_reminder(self, db, seed, mock_messaging):
+        """Job already reminded -> not sent again."""
+        from app.services.scheduler_service import SchedulerService
+
+        cleaner = seed["cleaner_a"]
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        job, offer = await _make_pending_job(db, scheduled_date=tomorrow)
+        job.status = JobStatus.CONFIRMED.value
+        job.assigned_cleaner_id = cleaner.id
+        job.eve_reminder_sent = True  # Already reminded
+        offer.status = "accepted"
+        await db.flush()
+
+        svc = SchedulerService(db)
+        svc.messaging = mock_messaging
+
+        result = await svc.run_eve_of_job_reminder()
+
+        assert result["reminders_sent"] == 0
+        mock_messaging.send_eve_of_job_reminder.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_reminder_for_day_after_tomorrow(self, db, seed, mock_messaging):
+        """Job 2 days out -> no reminder sent yet."""
+        from app.services.scheduler_service import SchedulerService
+
+        cleaner = seed["cleaner_a"]
+        day_after = datetime.now(timezone.utc) + timedelta(days=2)
+        job, offer = await _make_pending_job(db, scheduled_date=day_after)
+        job.status = JobStatus.CONFIRMED.value
+        job.assigned_cleaner_id = cleaner.id
+        offer.status = "accepted"
+        await db.flush()
+
+        svc = SchedulerService(db)
+        svc.messaging = mock_messaging
+
+        result = await svc.run_eve_of_job_reminder()
+
+        assert result["reminders_sent"] == 0
+        mock_messaging.send_eve_of_job_reminder.assert_not_called()
+        await db.refresh(job)
+        assert job.eve_reminder_sent is False
+
+    @pytest.mark.asyncio
+    async def test_no_reminder_for_pending_job(self, db, seed, mock_messaging):
+        """Pending (not confirmed) job -> no reminder."""
+        from app.services.scheduler_service import SchedulerService
+
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+        job, offer = await _make_pending_job(db, scheduled_date=tomorrow)
+        # Job stays in OFFERED status — not confirmed
+        await db.flush()
+
+        svc = SchedulerService(db)
+        svc.messaging = mock_messaging
+
+        result = await svc.run_eve_of_job_reminder()
+
+        assert result["reminders_sent"] == 0
+        mock_messaging.send_eve_of_job_reminder.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_multiple_jobs_grouped_per_cleaner(self, db, seed, mock_messaging):
+        """2 confirmed jobs tomorrow for same cleaner -> one reminder call."""
+        from app.services.scheduler_service import SchedulerService
+
+        cleaner = seed["cleaner_a"]
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+
+        job1, offer1 = await _make_pending_job(db, scheduled_date=tomorrow)
+        job1.status = JobStatus.CONFIRMED.value
+        job1.assigned_cleaner_id = cleaner.id
+        offer1.status = "accepted"
+
+        job2, offer2 = await _make_pending_job(db, scheduled_date=tomorrow, batch_position=2)
+        job2.status = JobStatus.CONFIRMED.value
+        job2.assigned_cleaner_id = cleaner.id
+        offer2.status = "accepted"
+        await db.flush()
+
+        svc = SchedulerService(db)
+        svc.messaging = mock_messaging
+
+        result = await svc.run_eve_of_job_reminder()
+
+        assert result["reminders_sent"] == 2
+        assert result["cleaners_notified"] == 1
+        # One call for the cleaner with both jobs
+        mock_messaging.send_eve_of_job_reminder.assert_called_once()
+
+        await db.refresh(job1)
+        await db.refresh(job2)
+        assert job1.eve_reminder_sent is True
+        assert job2.eve_reminder_sent is True

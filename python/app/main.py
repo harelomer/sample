@@ -57,6 +57,17 @@ async def scheduled_reminder_check():
         logger.info(f"Reminder check result: {result}")
 
 
+async def scheduled_eve_of_job_reminder():
+    """Send evening-before reminders for tomorrow's confirmed jobs."""
+    from app.services.scheduler_service import SchedulerService
+
+    logger.info("Running scheduled eve-of-job reminder")
+    async with get_db_session() as db:
+        service = SchedulerService(db)
+        result = await service.run_eve_of_job_reminder()
+        logger.info(f"Eve-of-job reminder result: {result}")
+
+
 async def scheduled_expiration_check():
     """Run expiration check periodically."""
     from app.services.scheduler_service import SchedulerService
@@ -100,6 +111,18 @@ async def lifespan(app: FastAPI):
         scheduled_reminder_check,
         CronTrigger(hour="*/2"),
         id="reminder_check",
+        replace_existing=True
+    )
+
+    # Eve-of-job reminder at 7 PM daily in configured timezone
+    scheduler.add_job(
+        scheduled_eve_of_job_reminder,
+        CronTrigger(
+            hour=settings.eve_reminder_hour,
+            minute=0,
+            timezone=delivery_tz,
+        ),
+        id="eve_of_job_reminder",
         replace_existing=True
     )
 

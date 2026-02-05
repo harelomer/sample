@@ -308,6 +308,98 @@ class SchedulerService:
             reminder_number=offer.reminder_count + 1
         )
 
+    async def run_eve_of_job_reminder(self) -> Dict[str, Any]:
+        """
+        Send evening-before reminders for confirmed jobs scheduled tomorrow.
+
+        Finds all confirmed/en_route jobs where scheduled_date is tomorrow,
+        groups them by assigned cleaner, and sends a single reminder per cleaner.
+
+        Returns:
+            Summary of reminders sent
+        """
+        logger.info("Running eve-of-job reminder check")
+
+        import pytz
+        tz = pytz.timezone(self.settings.batch_delivery_timezone)
+        local_now = datetime.now(tz)
+        tomorrow_local = (local_now + timedelta(days=1)).date()
+
+        # Find confirmed jobs scheduled for tomorrow that haven't been reminded
+        result = await self.db.execute(
+            select(Job)
+            .options(selectinload(Job.rental_property))
+            .where(
+                and_(
+                    Job.status.in_([
+                        JobStatus.CONFIRMED.value,
+                        JobStatus.EN_ROUTE.value,
+                    ]),
+                    Job.assigned_cleaner_id.isnot(None),
+                    Job.eve_reminder_sent == False,
+                )
+            )
+        )
+        jobs = result.scalars().all()
+
+        # Filter to jobs whose scheduled_date is tomorrow in local timezone
+        tomorrow_jobs = []
+        for job in jobs:
+            if job.scheduled_date is None:
+                continue
+            job_date = job.scheduled_date
+            if job_date.tzinfo is not None:
+                job_date = job_date.astimezone(tz)
+            if job_date.date() == tomorrow_local:
+                tomorrow_jobs.append(job)
+
+        if not tomorrow_jobs:
+            logger.info("No confirmed jobs for tomorrow needing reminders")
+            return {"reminders_sent": 0, "cleaners_notified": 0}
+
+        # Group by cleaner
+        cleaner_jobs: Dict[int, List[Job]] = defaultdict(list)
+        for job in tomorrow_jobs:
+            cleaner_jobs[job.assigned_cleaner_id].append(job)
+
+        results = {
+            "reminders_sent": 0,
+            "cleaners_notified": 0,
+            "failures": [],
+        }
+
+        for cleaner_id, cjobs in cleaner_jobs.items():
+            try:
+                cleaner_result = await self.db.execute(
+                    select(Cleaner).where(Cleaner.id == cleaner_id)
+                )
+                cleaner = cleaner_result.scalar_one_or_none()
+                if not cleaner:
+                    continue
+
+                await self.messaging.send_eve_of_job_reminder(
+                    cleaner=cleaner, jobs=cjobs
+                )
+
+                # Mark all these jobs as reminded
+                for job in cjobs:
+                    job.eve_reminder_sent = True
+
+                results["cleaners_notified"] += 1
+                results["reminders_sent"] += len(cjobs)
+            except Exception as e:
+                logger.error(
+                    f"Error sending eve reminder to cleaner {cleaner_id}: {e}"
+                )
+                results["failures"].append({
+                    "cleaner_id": cleaner_id,
+                    "error": str(e),
+                })
+
+        await self.db.flush()
+        logger.info(f"Eve-of-job reminders complete: {results}")
+        return results
+
     async def run_expiration_check(self) -> Dict[str, Any]:
         """
         Check for expired offers and cascade to next cleaner.
