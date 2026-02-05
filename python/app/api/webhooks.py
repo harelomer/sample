@@ -288,15 +288,18 @@ async def _process_cleaner_message(
         )
 
         if len(pending_offers) > 1 and not is_confirming_multi:
-            # Multiple pending offers - ask for confirmation first
-            jobs_list = "\n".join(
-                f"  {i+1}) {j.get('property_name', 'Property')} - {j.get('date', 'TBD')} at {j.get('time', 'TBD')}"
-                for i, j in enumerate(pending_jobs)
+            # Multiple pending offers - ask for confirmation using AI
+            jobs_desc = ", ".join(
+                f"{j.get('property_name', 'Property')} on {j.get('date', 'TBD')} at {j.get('time', 'TBD')}"
+                for j in pending_jobs
             )
-            confirm_msg = (
-                f"Just to confirm - you want all {len(pending_offers)} jobs?\n"
-                f"{jobs_list}\n"
-                f"Reply 'yes all' to confirm, or tell me which ones."
+            confirm_msg = await ai_service.generate_conversational_message(
+                "multi_job_confirm",
+                {
+                    "cleaner_name": cleaner.name.split()[0] if cleaner.name else "there",
+                    "job_count": len(pending_offers),
+                    "jobs_description": jobs_desc,
+                }
             )
             await messaging_service.send_to_cleaner(cleaner, confirm_msg)
 
@@ -416,11 +419,15 @@ async def _process_cleaner_message(
         result["details"]["question_type"] = interpretation.question_type
 
     elif interpretation.needs_clarification:
-        # Ask for clarification
-        await messaging_service.send_to_cleaner(
-            cleaner,
-            interpretation.clarification_question or "I'm not sure I understood. Could you please clarify?"
+        # Ask for clarification using AI for natural tone
+        clarification_msg = await ai_service.generate_conversational_message(
+            "clarification",
+            {
+                "cleaner_name": cleaner.name.split()[0] if cleaner.name else "there",
+                "original_message": message_text,
+            }
         )
+        await messaging_service.send_to_cleaner(cleaner, clarification_msg)
 
     # Update conversation context
     if context:

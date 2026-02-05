@@ -246,7 +246,7 @@ class MessagingService:
         reminder_number: int = 1
     ) -> Dict[str, Any]:
         """
-        Send a reminder about pending job offers.
+        Send a reminder about pending job offers using AI for natural tone.
 
         Args:
             cleaner: Cleaner model instance
@@ -256,11 +256,29 @@ class MessagingService:
         Returns:
             Send result
         """
+        from app.services.ai_service import AIService
+
+        ai_service = AIService()
+        cleaner_name = cleaner.name.split()[0] if cleaner.name else "there"
+
         if len(jobs) == 1:
             job = jobs[0]
-            message = f"Hi! Just checking - can you do {job.rental_property.short_name} on {job.scheduled_date.strftime('%A')}? Let me know!"
+            message = await ai_service.generate_conversational_message(
+                "reminder",
+                {
+                    "cleaner_name": cleaner_name,
+                    "property_name": job.rental_property.short_name if job.rental_property else "the property",
+                    "date": job.scheduled_date.strftime('%A') if job.scheduled_date else "soon",
+                }
+            )
         else:
-            message = f"Hi! I still need confirmation for {len(jobs)} jobs. Can you let me know?"
+            message = await ai_service.generate_conversational_message(
+                "reminder_batch",
+                {
+                    "cleaner_name": cleaner_name,
+                    "job_count": len(jobs),
+                }
+            )
 
         return await self.send_to_cleaner(cleaner, message)
 

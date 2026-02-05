@@ -124,7 +124,7 @@ class AIService:
         is_batch: bool = False
     ) -> str:
         """
-        Generate a natural job offer message for a cleaner.
+        Generate a natural job offer message for a cleaner using AI.
 
         Args:
             jobs: List of job details
@@ -132,24 +132,146 @@ class AIService:
             is_batch: Whether this is a batch of multiple jobs
 
         Returns:
-            Formatted message string
+            Natural-sounding message string
         """
         if not jobs:
             return ""
 
+        system_prompt = """You are a friendly property manager texting a cleaner on WhatsApp.
+Write like a real person - casual, warm, no corporate speak. Use natural language.
+No emojis. No markdown. No bullet points or numbered lists.
+Keep it short - like a real text message between people who know each other.
+Always include the key details: property name, date, time, and pay."""
+
         if len(jobs) == 1 and not is_batch:
             job = jobs[0]
-            return (
-                f"Hi {cleaner_name}! Can you clean {job['property_name']} on "
-                f"{job['date']} at {job['time']}? ${job['amount']}"
+            user_prompt = (
+                f"Text {cleaner_name} about a cleaning job:\n"
+                f"Property: {job['property_name']}\n"
+                f"Date: {job['date']}\n"
+                f"Time: {job['time']}\n"
+                f"Pay: ${job['amount']}\n"
+                f"Ask if they can take it."
+            )
+        else:
+            jobs_info = "\n".join(
+                f"- {job['property_name']} on {job['date']} at {job['time']} for ${job['amount']}"
+                for job in jobs
+            )
+            user_prompt = (
+                f"Text {cleaner_name} about {len(jobs)} cleaning jobs available:\n"
+                f"{jobs_info}\n"
+                f"Ask which ones they can take."
             )
 
-        # Batch message
-        lines = [f"Hi {cleaner_name}! Jobs for you:"]
-        for i, job in enumerate(jobs, 1):
-            lines.append(f"{i}) {job['property_name']} {job['date']} {job['time']} ${job['amount']}")
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=256,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Error generating job offer message: {e}")
+            # Fallback to simple template
+            if len(jobs) == 1:
+                job = jobs[0]
+                return (
+                    f"Hey {cleaner_name}, are you free for {job['property_name']} on "
+                    f"{job['date']} at {job['time']}? Pays ${job['amount']}. Let me know!"
+                )
+            lines = [f"Hey {cleaner_name}, got {len(jobs)} jobs if you're interested:"]
+            for job in jobs:
+                lines.append(f"{job['property_name']} - {job['date']} {job['time']} ${job['amount']}")
+            lines.append("Let me know which ones work for you!")
+            return "\n".join(lines)
 
-        return "\n".join(lines)
+    async def generate_conversational_message(
+        self,
+        message_type: str,
+        data: Dict[str, Any]
+    ) -> str:
+        """
+        Generate a natural conversational message for any scenario.
+
+        Args:
+            message_type: Type of message (multi_job_confirm, reminder, etc.)
+            data: Context data for the message
+
+        Returns:
+            Natural-sounding message
+        """
+        system_prompt = """You are a friendly property manager texting on WhatsApp.
+Write like a real person - casual, warm, brief. No corporate speak.
+No emojis. No markdown. No numbered lists.
+Sound like you're texting a coworker you're friendly with."""
+
+        prompts = {
+            "multi_job_confirm": (
+                f"You sent {data.get('cleaner_name', 'the cleaner')} "
+                f"{data.get('job_count', 'multiple')} job offers and they said yes. "
+                f"But you're not sure if they mean all of them. The jobs are:\n"
+                f"{data.get('jobs_description', '')}\n"
+                f"Ask them casually to confirm which ones they want, "
+                f"or if they want all of them."
+            ),
+            "reminder": (
+                f"You texted {data.get('cleaner_name', 'the cleaner')} about a cleaning job "
+                f"at {data.get('property_name', 'a property')} on {data.get('date', 'soon')} "
+                f"but they haven't replied. Send a friendly nudge - not pushy."
+            ),
+            "reminder_batch": (
+                f"You texted {data.get('cleaner_name', 'the cleaner')} about "
+                f"{data.get('job_count', 'some')} jobs but they haven't replied. "
+                f"Send a friendly check-in."
+            ),
+            "clarification": (
+                f"The cleaner said something unclear: \"{data.get('original_message', '')}\"\n"
+                f"You need to know if they can take the job. "
+                f"Ask them to clarify in a natural way."
+            ),
+        }
+
+        user_prompt = prompts.get(message_type, f"Generate a message about: {data}")
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=256,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Error generating conversational message: {e}")
+            return self._get_fallback_conversational(message_type, data)
+
+    def _get_fallback_conversational(self, message_type: str, data: Dict[str, Any]) -> str:
+        """Fallback messages when AI generation fails."""
+        fallbacks = {
+            "multi_job_confirm": (
+                f"Hey just making sure - did you mean you want all "
+                f"{data.get('job_count', 'the')} jobs? Or just some of them? "
+                f"Let me know which ones work for you"
+            ),
+            "reminder": (
+                f"Hey, just checking in about {data.get('property_name', 'the cleaning job')} "
+                f"on {data.get('date', 'the scheduled date')}. Can you do it?"
+            ),
+            "reminder_batch": (
+                f"Hey, still need to hear back about those "
+                f"{data.get('job_count', '')} jobs. Let me know when you get a chance"
+            ),
+            "clarification": (
+                "Hey not sure I caught that - are you good to take the job or not?"
+            ),
+        }
+        return fallbacks.get(message_type, "Hey, just checking in. Let me know!")
 
     async def generate_response(
         self,
@@ -168,9 +290,10 @@ class AIService:
         Returns:
             Generated response message
         """
-        system_prompt = """You are an assistant helping with property management communication.
-Generate short, friendly WhatsApp-style responses. No markdown, no emojis unless specified.
-Keep responses under 160 characters when possible."""
+        system_prompt = """You are a friendly property manager texting on WhatsApp.
+Write like a real person - casual, warm, brief. No corporate speak.
+No emojis. No markdown. Keep it short like a real text.
+Sound like you're texting someone you work with regularly."""
 
         prompts = {
             "accept_job": "Generate a confirmation message for accepted cleaning job(s).",
