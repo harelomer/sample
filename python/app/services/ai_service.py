@@ -337,7 +337,12 @@ Common response patterns:
 - Status updates: "on my way", "here", "started", "done", "finished"
 - Acknowledgment: "cool", "thanks", "ok thanks", "thank you", "sounds good", "great", "got it", "its ok thank you"
 
-IMPORTANT: If there are NO pending job offers listed, casual or positive messages like "cool", "thanks", "ok", "sounds good" are acknowledgments, NOT job acceptances.
+IMPORTANT rules when there are NO pending job offers:
+- Casual/positive messages ("cool", "thanks", "ok", "sounds good", "great") → acknowledgment
+- Messages about not being able to come ("schedule changed", "cant come", "need to cancel") → reject_job (cancellation)
+- Greetings with no job context ("hello", "hi") → acknowledgment
+- Questions ("what job?", "what time?") → question
+- NEVER classify as accept_job when there are no pending offers
 
 You must respond with valid JSON in this exact format:
 {
@@ -399,9 +404,11 @@ Respond with valid JSON:
             parts.append(f"\nLast message sent to cleaner: \"{context['last_outbound_message']}\"")
 
         if pending_jobs:
-            parts.append("\nPending job offers:")
+            parts.append(f"\nPending job offers ({len(pending_jobs)}):")
             for i, job in enumerate(pending_jobs, 1):
                 parts.append(f"  {i}. {job.get('property_name', 'Property')} on {job.get('date', 'TBD')} at {job.get('time', 'TBD')}")
+        else:
+            parts.append("\nPending job offers: NONE (no jobs awaiting response)")
 
         if context.get("recent_messages"):
             parts.append("\nRecent conversation:")
