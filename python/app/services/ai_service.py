@@ -1,5 +1,5 @@
 """
-AI Service using Claude (Anthropic API) for message interpretation.
+AI Service using OpenAI API for message interpretation.
 
 This service handles all AI-powered message interpretation, including:
 - Understanding cleaner responses (accept, reject, partial)
@@ -10,7 +10,7 @@ This service handles all AI-powered message interpretation, including:
 import json
 import logging
 from typing import Optional, Dict, Any, List
-from anthropic import Anthropic
+from openai import OpenAI
 
 from app.config import get_settings
 from app.schemas.message import AIInterpretation
@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 class AIService:
-    """Service for AI-powered message interpretation using Claude."""
+    """Service for AI-powered message interpretation using OpenAI."""
 
     def __init__(self):
-        """Initialize the AI service with Anthropic client."""
+        """Initialize the AI service with OpenAI client."""
         self.settings = get_settings()
-        self.client = Anthropic(api_key=self.settings.anthropic_api_key)
-        self.model = self.settings.claude_model
-        self.max_tokens = self.settings.claude_max_tokens
+        self.client = OpenAI(api_key=self.settings.openai_api_key)
+        self.model = self.settings.openai_model
+        self.max_tokens = self.settings.openai_max_tokens
 
     async def interpret_cleaner_message(
         self,
@@ -49,15 +49,17 @@ class AIService:
         user_prompt = self._format_cleaner_context(message, context, pending_jobs)
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}]
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
             )
 
             # Parse the JSON response
-            result = self._parse_ai_response(response.content[0].text)
+            result = self._parse_ai_response(response.choices[0].message.content)
             return self._create_interpretation(result)
 
         except Exception as e:
@@ -94,14 +96,16 @@ class AIService:
         user_prompt = self._format_guest_context(message, context, property_info, stay_info)
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}]
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
             )
 
-            return self._parse_ai_response(response.content[0].text)
+            return self._parse_ai_response(response.choices[0].message.content)
 
         except Exception as e:
             logger.error(f"Error interpreting guest message: {e}")
@@ -184,13 +188,15 @@ Data: {json.dumps(data)}
 {prompts.get(intent, 'Generate an appropriate response.')}"""
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=256,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}]
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
             )
-            return response.content[0].text.strip()
+            return response.choices[0].message.content.strip()
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return self._get_fallback_response(intent)

@@ -14,7 +14,7 @@ services:
         fromDatabase:
           name: property-management-db
           property: connectionString
-      - key: ANTHROPIC_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
       - key: GREEN_API_INSTANCE_ID
         sync: false

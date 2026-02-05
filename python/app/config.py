@@ -18,10 +18,10 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./property_management.db"
 
-    # Anthropic Claude API
-    anthropic_api_key: str = ""
-    claude_model: str = "claude-sonnet-4-20250514"
-    claude_max_tokens: int = 1024
+    # OpenAI API
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_max_tokens: int = 1024
 
     # WhatsApp - Green API
     green_api_instance_id: str = ""
