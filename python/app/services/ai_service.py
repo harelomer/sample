@@ -296,6 +296,7 @@ You are writing TO the cleaner. Never refer to them in third person."""
         prompts = {
             "accept_job": "The cleaner already said yes. Confirm they are booked. Do NOT ask them to confirm again.",
             "reject_job": "The cleaner declined the job. Acknowledge briefly and let them know it will be reassigned.",
+            "cancel_job": "The cleaner is cancelling a job they previously accepted. Acknowledge the cancellation and let them know the job will be reassigned.",
             "partial_accept": "The cleaner accepted some jobs and declined others. Confirm which are booked and note the rest will be reassigned.",
             "question": "Answer the cleaner's question based on context.",
             "status_update": "Acknowledge the status update briefly.",
@@ -330,7 +331,7 @@ Your task is to interpret cleaner responses to job offers. Cleaners often respon
 
 Common response patterns:
 - Acceptance: "yes", "sure", "I can do it", "confirmed", "👍" (ONLY when responding to a job offer)
-- Rejection: "can't", "no", "not available", "busy", "pass"
+- Rejection/Cancellation: "can't", "no", "not available", "busy", "pass", "my schedule changed", "I cant come clean", "need to cancel"
 - Partial (for batches): "only 1 and 3", "just the oakland one", "all except friday"
 - Questions: "what time?", "which property?", "how much?", "what job?"
 - Status updates: "on my way", "here", "started", "done", "finished"
@@ -467,6 +468,7 @@ Respond with valid JSON:
         fallbacks = {
             "accept_job": "Confirmed, you're booked. We'll send details before the job.",
             "reject_job": "Understood. Job will be reassigned.",
+            "cancel_job": "Understood, job cancelled. It will be reassigned.",
             "partial_accept": "Noted. Assignments updated.",
             "question": "Checking on that. Will follow up shortly.",
             "status_update": "Noted, thank you.",

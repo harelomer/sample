@@ -308,9 +308,9 @@ async def _process_cleaner_message(
     # Take action based on intent
     result = {"action_taken": interpretation.intent, "details": {}}
 
-    # If there are no pending offers, don't process accept/reject/partial intents
+    # If there are no pending offers, don't process accept/partial intents
     # — casual messages after a completed booking should not trigger new actions
-    if not pending_offers and interpretation.intent in ("accept_job", "reject_job", "partial_accept"):
+    if not pending_offers and interpretation.intent in ("accept_job", "partial_accept"):
         logger.info(f"Ignoring '{interpretation.intent}' intent — no pending offers for cleaner {cleaner.id}")
         result["action_taken"] = "no_action"
         result["details"]["reason"] = "no_pending_offers"
@@ -369,18 +369,51 @@ async def _process_cleaner_message(
             await messaging_service.send_to_cleaner(cleaner, response)
 
     elif interpretation.intent == "reject_job":
-        # Reject all pending offers
-        for offer in pending_offers:
-            await job_service.reject_job_offer(offer.id, message_text)
-        result["details"]["rejected_offers"] = len(pending_offers)
+        if pending_offers:
+            # Reject pending offers
+            for offer in pending_offers:
+                await job_service.reject_job_offer(offer.id, message_text)
+            result["details"]["rejected_offers"] = len(pending_offers)
 
-        # Send acknowledgment
-        response = await ai_service.generate_response(
-            context=context_dict.get("last_outbound_message", ""),
-            intent="reject_job",
-            data={}
-        )
-        await messaging_service.send_to_cleaner(cleaner, response)
+            response = await ai_service.generate_response(
+                context=context_dict.get("last_outbound_message", ""),
+                intent="reject_job",
+                data={}
+            )
+            await messaging_service.send_to_cleaner(cleaner, response)
+        else:
+            # No pending offers — check if cleaner is cancelling an accepted/active job
+            active_job_result = await db.execute(
+                select(Job).where(
+                    and_(
+                        Job.assigned_cleaner_id == cleaner.id,
+                        Job.status.in_([
+                            JobStatus.CONFIRMED.value,
+                            JobStatus.EN_ROUTE.value,
+                            JobStatus.IN_PROGRESS.value
+                        ])
+                    )
+                )
+            )
+            active_job = active_job_result.scalar_one_or_none()
+
+            if active_job:
+                await job_service.update_job_status(
+                    active_job.id, JobStatus.CANCELLED, "cleaner", message_text, message.id
+                )
+                result["action_taken"] = "job_cancelled"
+                result["details"]["job_id"] = active_job.id
+
+                response = await ai_service.generate_response(
+                    context=context_dict.get("last_outbound_message", ""),
+                    intent="cancel_job",
+                    data={"job_id": active_job.id}
+                )
+                await messaging_service.send_to_cleaner(cleaner, response)
+            else:
+                # No pending offers, no active jobs — just acknowledge
+                result["action_taken"] = "no_action"
+                result["details"]["reason"] = "no_active_jobs"
 
     elif interpretation.intent == "partial_accept":
         # Handle partial acceptance
