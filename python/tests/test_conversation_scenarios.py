@@ -698,9 +698,9 @@ class TestKeywordFallback:
         assert result.intent == "accept_job"
 
     def test_yes_without_pending(self):
-        """'Yes' with NO pending -> should NOT be accept_job."""
+        """'Yes' with NO pending -> still accept_job (handler decides what to do)."""
         result = self._fallback("Yes", [])
-        assert result.intent != "accept_job"
+        assert result.intent == "accept_job"
 
     # -- rejection --
 
@@ -1301,3 +1301,220 @@ class TestRealMessages:
         r3 = await process_real(db, cleaner, "Thanks", mock_messaging)
         assert r3["action_taken"] == "acknowledgment"
         mock_messaging.send_to_cleaner.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# 16. Reclaim after rejection (take-back when job still unassigned)            #
+# --------------------------------------------------------------------------- #
+
+async def _make_rejected_job(db, cleaner_id=1, property_id=1, job_status=JobStatus.PENDING.value):
+    """Create a job with a rejected offer from the given cleaner."""
+    job = Job(
+        property_id=property_id, job_type="turnover",
+        status=job_status, urgency="normal",
+        scheduled_date=datetime.now(timezone.utc) + timedelta(days=2),
+        scheduled_time="10:00", payment_amount=80.0,
+        max_assignment_attempts=5, assignment_attempts=2,
+    )
+    db.add(job)
+    await db.flush()
+
+    offer = JobOffer(
+        job_id=job.id, cleaner_id=cleaner_id,
+        offered_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        offered_amount=80.0, status="rejected",
+        responded_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+        batch_position=1,
+    )
+    db.add(offer)
+    await db.flush()
+    return job, offer
+
+
+class TestReclaimAfterRejection:
+    """
+    Tests for the take-back scenario: cleaner rejects, then changes mind.
+
+    Rules:
+    - Allow reclaim ONLY if the job is unassigned (PENDING or ESCALATED)
+    - Block reclaim if job is OFFERED to another cleaner or CONFIRMED
+    """
+
+    @pytest.mark.asyncio
+    async def test_reclaim_pending_job(self, db, seed, mock_ai, mock_messaging):
+        """Cleaner rejected, job still PENDING (no one else got it) -> reclaim works."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_rejected_job(db, cleaner_id=cleaner.id)
+
+        result = await process(
+            db, cleaner, "Wait actually yes I can do it", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="accept_job", confidence=85,
+                suggested_response="Confirmed, you're booked.",
+            ),
+        )
+
+        assert result["action_taken"] == "accept_job"
+        assert result["details"]["reclaimed"] is True
+
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+
+        await db.refresh(job)
+        assert job.status == JobStatus.CONFIRMED.value
+        assert job.assigned_cleaner_id == cleaner.id
+
+    @pytest.mark.asyncio
+    async def test_reclaim_escalated_job(self, db, seed, mock_ai, mock_messaging):
+        """Job ESCALATED (all cleaners exhausted) -> reclaim works."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_rejected_job(
+            db, cleaner_id=cleaner.id, job_status=JobStatus.ESCALATED.value,
+        )
+
+        result = await process(
+            db, cleaner, "Yes I changed my mind", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="accept_job", confidence=85,
+                suggested_response="Confirmed, you're booked.",
+            ),
+        )
+
+        assert result["action_taken"] == "accept_job"
+        assert result["details"]["reclaimed"] is True
+
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+
+        await db.refresh(job)
+        assert job.status == JobStatus.CONFIRMED.value
+
+    @pytest.mark.asyncio
+    async def test_no_reclaim_when_offered_to_another(self, db, seed, mock_ai, mock_messaging):
+        """Job OFFERED to another cleaner -> reclaim blocked."""
+        cleaner_a = seed["cleaner_a"]
+        cleaner_b = seed["cleaner_b"]
+
+        # Cleaner A rejected, job cascaded to cleaner B (OFFERED with pending offer)
+        job = Job(
+            property_id=1, job_type="turnover",
+            status=JobStatus.OFFERED.value, urgency="normal",
+            scheduled_date=datetime.now(timezone.utc) + timedelta(days=2),
+            scheduled_time="10:00", payment_amount=80.0,
+            max_assignment_attempts=5, assignment_attempts=2,
+        )
+        db.add(job)
+        await db.flush()
+
+        # A's rejected offer
+        offer_a = JobOffer(
+            job_id=job.id, cleaner_id=cleaner_a.id,
+            offered_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            offered_amount=80.0, status="rejected",
+            responded_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+            batch_position=1,
+        )
+        db.add(offer_a)
+
+        # B's pending offer (job is OFFERED to B)
+        offer_b = JobOffer(
+            job_id=job.id, cleaner_id=cleaner_b.id,
+            offered_at=datetime.now(timezone.utc),
+            offered_amount=80.0, status="pending",
+            batch_position=2,
+        )
+        db.add(offer_b)
+        await db.flush()
+
+        # A tries to accept -> should NOT reclaim (job is OFFERED, not PENDING)
+        result = await process(
+            db, cleaner_a, "Wait actually yes", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="accept_job", confidence=85,
+                suggested_response="Confirmed.",
+            ),
+        )
+
+        assert result["action_taken"] == "no_action"
+        assert result["details"]["reason"] == "no_pending_offers"
+
+        # Original rejection unchanged
+        await db.refresh(offer_a)
+        assert offer_a.status == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_no_reclaim_when_confirmed_by_another(self, db, seed, mock_ai, mock_messaging):
+        """Job CONFIRMED by another cleaner -> reclaim blocked."""
+        cleaner_a = seed["cleaner_a"]
+        cleaner_b = seed["cleaner_b"]
+
+        job = Job(
+            property_id=1, job_type="turnover",
+            status=JobStatus.CONFIRMED.value, urgency="normal",
+            scheduled_date=datetime.now(timezone.utc) + timedelta(days=2),
+            scheduled_time="10:00", payment_amount=80.0,
+            assigned_cleaner_id=cleaner_b.id,
+            max_assignment_attempts=5, assignment_attempts=2,
+        )
+        db.add(job)
+        await db.flush()
+
+        # A's rejected offer
+        offer_a = JobOffer(
+            job_id=job.id, cleaner_id=cleaner_a.id,
+            offered_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            offered_amount=80.0, status="rejected",
+            responded_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+            batch_position=1,
+        )
+        db.add(offer_a)
+        await db.flush()
+
+        # A tries to accept -> should NOT reclaim (job confirmed by B)
+        result = await process(
+            db, cleaner_a, "I changed my mind", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="accept_job", confidence=85,
+                suggested_response="Confirmed.",
+            ),
+        )
+
+        assert result["action_taken"] == "no_action"
+        assert result["details"]["reason"] == "no_pending_offers"
+
+    # -- Real-message integration test --
+
+    @pytest.mark.asyncio
+    async def test_real_msg_reject_then_reclaim(self, db, seed, mock_messaging):
+        """
+        Full pipeline with real messages — the user's exact scenario:
+          Turn 1: 'No' -> reject_job (offer rejected, job stays PENDING)
+          Turn 2: 'Yes' -> accept_job via reclaim (offer re-accepted)
+        """
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        # Turn 1: reject
+        r1 = await process_real(db, cleaner, "No", mock_messaging)
+        assert r1["action_taken"] == "reject_job"
+        await db.refresh(offer)
+        assert offer.status == "rejected"
+        await db.refresh(job)
+        assert job.status in (JobStatus.PENDING.value, JobStatus.OFFERED.value, JobStatus.ESCALATED.value)
+        mock_messaging.reset_mock()
+
+        # If cascade offered to someone else, force job back to PENDING
+        # to simulate the "no other cleaners available" scenario
+        job.status = JobStatus.PENDING.value
+        await db.flush()
+
+        # Turn 2: change mind
+        r2 = await process_real(db, cleaner, "Yes", mock_messaging)
+        assert r2["action_taken"] == "accept_job"
+        assert r2["details"].get("reclaimed") is True
+
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+        await db.refresh(job)
+        assert job.status == JobStatus.CONFIRMED.value
+        assert job.assigned_cleaner_id == cleaner.id

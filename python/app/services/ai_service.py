@@ -523,13 +523,14 @@ Respond with valid JSON:
                     suggested_response="Understood, job cancelled. It will be reassigned."
                 )
 
-        # Acceptance keywords (only with pending jobs)
+        # Acceptance keywords — always classify as accept_job, handler decides
+        # what to do (accept pending, reclaim rejected, or "no offers")
         accept_phrases = ["i can do", "can do it", "i can", "i will", "ill do",
                           "i'll do", "count me in"]
         accept_single = ["yes", "yeah", "yep", "yea", "sure", "confirm",
                          "confirmed", "accepted", "absolutely"]
         is_accept = any(has_phrase(p) for p in accept_phrases) or any(has_word(w) for w in accept_single)
-        if has_pending and is_accept:
+        if is_accept:
             return AIInterpretation(
                 intent="accept_job", confidence=70,
                 suggested_response="Confirmed, you're booked. We'll send details before the job."

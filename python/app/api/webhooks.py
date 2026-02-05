@@ -293,6 +293,34 @@ async def _cancel_active_job(
         logger.error(f"Auto-reassignment failed for cancelled job {job.id}: {e}")
 
 
+async def _find_reclaimable_job(
+    db: AsyncSession, cleaner_id: int
+) -> Optional[tuple]:
+    """
+    Find a job this cleaner recently rejected that is still unassigned.
+
+    Only returns jobs in PENDING or ESCALATED status — meaning no other
+    cleaner currently has a pending offer or has confirmed the job.
+    """
+    result = await db.execute(
+        select(JobOffer, Job)
+        .join(Job, JobOffer.job_id == Job.id)
+        .where(
+            and_(
+                JobOffer.cleaner_id == cleaner_id,
+                JobOffer.status == "rejected",
+                Job.status.in_([JobStatus.PENDING.value, JobStatus.ESCALATED.value]),
+            )
+        )
+        .order_by(JobOffer.responded_at.desc())
+        .limit(1)
+    )
+    row = result.first()
+    if row:
+        return row[0], row[1]
+    return None
+
+
 async def _process_cleaner_message(
     db: AsyncSession,
     message: Message,
@@ -369,9 +397,27 @@ async def _process_cleaner_message(
 
     elif intent == "accept_job":
         if not pending_offers:
-            result["action_taken"] = "no_action"
-            result["details"]["reason"] = "no_pending_offers"
-            response = "There are no open job offers right now. We'll reach out when something is available."
+            # No pending offers — check if cleaner recently rejected a job
+            # that's still unassigned (not offered to or confirmed by anyone else)
+            reclaimable = await _find_reclaimable_job(db, cleaner.id)
+            if reclaimable:
+                old_offer, job = reclaimable
+                old_offer.status = "accepted"
+                old_offer.responded_at = datetime.now(timezone.utc)
+                old_offer.response_message = message_text
+                job.status = JobStatus.CONFIRMED.value
+                job.assigned_cleaner_id = cleaner.id
+                result["action_taken"] = "accept_job"
+                result["details"]["accepted_offers"] = 1
+                result["details"]["reclaimed"] = True
+                result["details"]["job_id"] = job.id
+                if context:
+                    context.conversation_state = "idle"
+                    context.awaiting_response_for = None
+            else:
+                result["action_taken"] = "no_action"
+                result["details"]["reason"] = "no_pending_offers"
+                response = "There are no open job offers right now. We'll reach out when something is available."
         elif len(pending_offers) > 1 and not (
             context and context.conversation_state == "awaiting_multi_job_confirmation"
         ):
