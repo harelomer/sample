@@ -2,7 +2,12 @@
 Comprehensive test suite for WhatsApp cleaner conversation handling.
 
 Tests all paths through _process_cleaner_message with a real in-memory
-SQLite database and mocked AI / messaging services.
+SQLite database.
+
+Two testing approaches:
+  1. Mocked-AI tests: pre-set AI interpretation, verify handler logic
+  2. Real-message integration tests: force keyword fallback (OpenAI fails),
+     send actual message strings, verify the FULL pipeline end-to-end
 
 Scenarios covered:
   - Accept a pending job (single offer)
@@ -21,6 +26,8 @@ Scenarios covered:
   - Keyword fallback when OpenAI API fails
   - Conversation context tracking (inbound + outbound recorded)
   - Full multi-turn conversation flows
+  - Real messages through keyword fallback: "Yes", "No", "Actually I cant",
+    "On my way", "Done", "Cool", "Let me check", and multi-turn flows
 """
 
 import pytest
@@ -385,79 +392,6 @@ class TestCancelConfirmedJob:
             assert o.cleaner_id != cleaner_a.id, (
                 "Same cleaner should not be reassigned after cancellation"
             )
-
-
-# --------------------------------------------------------------------------- #
-#  3b. Cancel misclassified as acknowledgment (safety override)                 #
-# --------------------------------------------------------------------------- #
-
-class TestCancelOverridesAcknowledgment:
-
-    @pytest.mark.asyncio
-    async def test_actually_i_cant_sorry(self, db, seed, mock_ai, mock_messaging):
-        """
-        AI says 'acknowledgment' for 'Actually I cant sorry' after booking.
-        Safety check should override to reject_job and cancel the active job.
-        """
-        cleaner = seed["cleaner_a"]
-        job, offer = await _make_confirmed_job(db)
-
-        # AI misclassifies as acknowledgment (the bug)
-        result = await process(
-            db, cleaner, "Actually I cant sorry", mock_ai, mock_messaging,
-            AIInterpretation(
-                intent="acknowledgment", confidence=60,
-                suggested_response="",
-            ),
-        )
-
-        # Safety override should reclassify to reject_job → cancel the job
-        assert result["action_taken"] == "job_cancelled"
-
-        await db.refresh(offer)
-        assert offer.status == "cancelled"
-
-        # A response MUST be sent (not silently swallowed)
-        mock_messaging.send_to_cleaner.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_cancel_keyword_with_no_active_job(self, db, seed, mock_ai, mock_messaging):
-        """
-        AI says 'acknowledgment' with cancel keyword but no active job → no_action.
-        """
-        cleaner = seed["cleaner_a"]
-        # No jobs at all
-
-        result = await process(
-            db, cleaner, "I cant come tomorrow", mock_ai, mock_messaging,
-            AIInterpretation(
-                intent="acknowledgment", confidence=50,
-                suggested_response="",
-            ),
-        )
-
-        # Override to reject_job, but no active job → no_action
-        assert result["action_taken"] == "no_action"
-        assert result["details"]["reason"] == "no_active_jobs"
-
-    @pytest.mark.asyncio
-    async def test_thanks_not_overridden(self, db, seed, mock_ai, mock_messaging):
-        """
-        'Thanks' has no cancel keywords → stays as acknowledgment (no override).
-        """
-        cleaner = seed["cleaner_a"]
-        await _make_confirmed_job(db)
-
-        result = await process(
-            db, cleaner, "Thanks", mock_ai, mock_messaging,
-            AIInterpretation(
-                intent="acknowledgment", confidence=90,
-                suggested_response="",
-            ),
-        )
-
-        assert result["action_taken"] == "acknowledgment"
-        mock_messaging.send_to_cleaner.assert_not_called()
 
 
 # --------------------------------------------------------------------------- #
@@ -1042,3 +976,328 @@ class TestFullFlows:
         await db.refresh(job)
         assert job.status == JobStatus.COMPLETED.value
         assert job.completed_at is not None
+
+
+# --------------------------------------------------------------------------- #
+# 15. Real-Message Integration Tests (keyword fallback, no mocked AI intent)   #
+# --------------------------------------------------------------------------- #
+
+async def process_real(db, cleaner, text, mock_messaging):
+    """
+    Run _process_cleaner_message with REAL message strings.
+
+    Forces OpenAI to fail so the keyword fallback classifies the message.
+    No pre-set AI intent — the message text drives the entire pipeline.
+    """
+    from app.services.ai_service import AIService
+
+    real_ai = AIService.__new__(AIService)
+    real_ai.settings = MagicMock()
+    real_ai.client = AsyncMock()
+    real_ai.client.chat.completions.create = AsyncMock(
+        side_effect=Exception("OpenAI unavailable — testing keyword fallback")
+    )
+    real_ai.model = "gpt-4"
+    real_ai.max_tokens = 256
+    # Wire up the methods that aren't overridden
+    real_ai.generate_conversational_message = AsyncMock(
+        return_value="Please confirm which jobs you want."
+    )
+
+    msg = _inbound_message(db, cleaner, text)
+    await db.flush()
+
+    with patch("app.api.webhooks.get_ai_service", return_value=real_ai), \
+         patch("app.api.webhooks.get_messaging_service", return_value=mock_messaging), \
+         patch("app.dependencies.get_ai_service", return_value=real_ai), \
+         patch("app.dependencies.get_messaging_service", return_value=mock_messaging):
+        result = await _process_cleaner_message(
+            db=db, message=msg, cleaner=cleaner,
+            message_text=text, chat_id=CHAT_ID,
+        )
+    await db.flush()
+    return result
+
+
+class TestRealMessages:
+    """
+    Integration tests using real message strings through keyword fallback.
+
+    These do NOT mock the AI intent — OpenAI is forced to fail so the
+    keyword_fallback rule engine classifies the message, then the handler
+    acts on it. This tests the full pipeline end-to-end with actual
+    WhatsApp-style messages.
+    """
+
+    # -- Accept --
+
+    @pytest.mark.asyncio
+    async def test_yes_accepts_pending(self, db, seed, mock_messaging):
+        """'Yes' with a pending offer -> accepted, job confirmed."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        result = await process_real(db, cleaner, "Yes", mock_messaging)
+
+        assert result["action_taken"] == "accept_job"
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+        await db.refresh(job)
+        assert job.status == JobStatus.CONFIRMED.value
+
+    @pytest.mark.asyncio
+    async def test_sure_accepts_pending(self, db, seed, mock_messaging):
+        """'Sure' with a pending offer -> accepted."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        result = await process_real(db, cleaner, "Sure", mock_messaging)
+
+        assert result["action_taken"] == "accept_job"
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+
+    @pytest.mark.asyncio
+    async def test_ok_accepts_pending(self, db, seed, mock_messaging):
+        """'ok' with a pending offer -> accepted."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        result = await process_real(db, cleaner, "ok", mock_messaging)
+
+        assert result["action_taken"] == "accept_job"
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+
+    # -- Reject pending --
+
+    @pytest.mark.asyncio
+    async def test_no_rejects_pending(self, db, seed, mock_messaging):
+        """'No' with a pending offer -> rejected, cascade triggered."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        result = await process_real(db, cleaner, "No", mock_messaging)
+
+        assert result["action_taken"] == "reject_job"
+        await db.refresh(offer)
+        assert offer.status == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_cant_come_rejects_pending(self, db, seed, mock_messaging):
+        """'I cant come' with a pending offer -> rejected."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        result = await process_real(db, cleaner, "I cant come", mock_messaging)
+
+        assert result["action_taken"] == "reject_job"
+        await db.refresh(offer)
+        assert offer.status == "rejected"
+
+    # -- Cancel confirmed job --
+
+    @pytest.mark.asyncio
+    async def test_actually_i_cant_cancels_confirmed(self, db, seed, mock_messaging):
+        """
+        'Actually I cant sorry' with a confirmed job -> job cancelled.
+
+        This is the exact scenario from the bug: cleaner accepts, then
+        sends a cancel message. The keyword fallback catches 'cant' as
+        reject_job, and the handler cancels the active job.
+        """
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_confirmed_job(db)
+
+        result = await process_real(db, cleaner, "Actually I cant sorry", mock_messaging)
+
+        assert result["action_taken"] == "job_cancelled"
+        await db.refresh(offer)
+        assert offer.status == "cancelled"
+        # Response MUST be sent (not silently swallowed)
+        mock_messaging.send_to_cleaner.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_my_schedule_changed_cancels_confirmed(self, db, seed, mock_messaging):
+        """'My schedule changed' with confirmed job -> cancelled."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_confirmed_job(db)
+
+        result = await process_real(db, cleaner, "My schedule changed", mock_messaging)
+
+        assert result["action_taken"] == "job_cancelled"
+        await db.refresh(offer)
+        assert offer.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_no_jobs_at_all(self, db, seed, mock_messaging):
+        """'I need to cancel' with no pending or active jobs -> no_action."""
+        cleaner = seed["cleaner_a"]
+
+        result = await process_real(db, cleaner, "I need to cancel", mock_messaging)
+
+        assert result["action_taken"] == "no_action"
+        assert result["details"]["reason"] == "no_active_jobs"
+
+    # -- Need time --
+
+    @pytest.mark.asyncio
+    async def test_let_me_check(self, db, seed, mock_messaging):
+        """'Let me check my schedule' -> need_time, offer stays pending."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        result = await process_real(db, cleaner, "Let me check my schedule", mock_messaging)
+
+        assert result["action_taken"] == "need_time"
+        await db.refresh(offer)
+        assert offer.status == "pending"  # unchanged
+        mock_messaging.send_to_cleaner.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_maybe(self, db, seed, mock_messaging):
+        """'maybe' -> need_time."""
+        cleaner = seed["cleaner_a"]
+        await _make_pending_job(db)
+
+        result = await process_real(db, cleaner, "maybe", mock_messaging)
+
+        assert result["action_taken"] == "need_time"
+
+    # -- Status updates --
+
+    @pytest.mark.asyncio
+    async def test_on_my_way_en_route(self, db, seed, mock_messaging):
+        """'On my way' with confirmed job -> EN_ROUTE."""
+        cleaner = seed["cleaner_a"]
+        job, _ = await _make_confirmed_job(db)
+
+        result = await process_real(db, cleaner, "On my way", mock_messaging)
+
+        assert result["action_taken"] == "status_update"
+        assert result["details"]["new_status"] == "en_route"
+        await db.refresh(job)
+        assert job.status == JobStatus.EN_ROUTE.value
+
+    @pytest.mark.asyncio
+    async def test_done_completes(self, db, seed, mock_messaging):
+        """'Done' with in-progress job -> COMPLETED."""
+        cleaner = seed["cleaner_a"]
+        job, _ = await _make_confirmed_job(db)
+        job.status = JobStatus.IN_PROGRESS.value
+        job.started_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        await db.flush()
+
+        result = await process_real(db, cleaner, "Done", mock_messaging)
+
+        assert result["details"]["new_status"] == "completed"
+        await db.refresh(job)
+        assert job.status == JobStatus.COMPLETED.value
+
+    # -- Acknowledgment --
+
+    @pytest.mark.asyncio
+    async def test_cool_no_response(self, db, seed, mock_messaging):
+        """'Cool' with no jobs -> acknowledgment, no message sent."""
+        cleaner = seed["cleaner_a"]
+
+        result = await process_real(db, cleaner, "Cool", mock_messaging)
+
+        assert result["action_taken"] == "acknowledgment"
+        mock_messaging.send_to_cleaner.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_thanks_no_response(self, db, seed, mock_messaging):
+        """'Thanks' -> acknowledgment, no message sent."""
+        cleaner = seed["cleaner_a"]
+
+        result = await process_real(db, cleaner, "Thanks", mock_messaging)
+
+        assert result["action_taken"] == "acknowledgment"
+        mock_messaging.send_to_cleaner.assert_not_called()
+
+    # -- Full multi-turn flows --
+
+    @pytest.mark.asyncio
+    async def test_full_flow_accept_then_cancel(self, db, seed, mock_messaging):
+        """
+        Full pipeline with real messages, no mocked intents:
+          Turn 1: 'Yes'                  -> accept_job (offer accepted, job confirmed)
+          Turn 2: 'Actually I cant sorry' -> reject_job (job cancelled, reassigned)
+        """
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        # Turn 1: accept
+        r1 = await process_real(db, cleaner, "Yes", mock_messaging)
+        assert r1["action_taken"] == "accept_job"
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+        await db.refresh(job)
+        assert job.status == JobStatus.CONFIRMED.value
+        mock_messaging.reset_mock()
+
+        # Turn 2: cancel
+        r2 = await process_real(db, cleaner, "Actually I cant sorry", mock_messaging)
+        assert r2["action_taken"] == "job_cancelled"
+        await db.refresh(offer)
+        assert offer.status == "cancelled"
+        mock_messaging.send_to_cleaner.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_full_flow_status_updates(self, db, seed, mock_messaging):
+        """
+        Full pipeline with real messages:
+          Turn 1: 'On my way' -> EN_ROUTE
+          Turn 2: 'Done'      -> COMPLETED
+        """
+        cleaner = seed["cleaner_a"]
+        job, _ = await _make_confirmed_job(db)
+
+        # Turn 1: en route
+        r1 = await process_real(db, cleaner, "On my way", mock_messaging)
+        assert r1["details"]["new_status"] == "en_route"
+        await db.refresh(job)
+        assert job.status == JobStatus.EN_ROUTE.value
+        mock_messaging.reset_mock()
+
+        # Simulate in-progress (arrived)
+        job.status = JobStatus.IN_PROGRESS.value
+        job.started_at = datetime.now(timezone.utc)
+        await db.flush()
+
+        # Turn 2: done
+        r2 = await process_real(db, cleaner, "Done", mock_messaging)
+        assert r2["details"]["new_status"] == "completed"
+        await db.refresh(job)
+        assert job.status == JobStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
+    async def test_full_flow_needtime_then_accept(self, db, seed, mock_messaging):
+        """
+        Full pipeline:
+          Turn 1: 'Let me check' -> need_time (offer stays pending)
+          Turn 2: 'Yes'          -> accept_job (offer accepted)
+          Turn 3: 'Thanks'       -> acknowledgment (silent)
+        """
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_pending_job(db)
+
+        # Turn 1
+        r1 = await process_real(db, cleaner, "Let me check", mock_messaging)
+        assert r1["action_taken"] == "need_time"
+        await db.refresh(offer)
+        assert offer.status == "pending"
+        mock_messaging.reset_mock()
+
+        # Turn 2
+        r2 = await process_real(db, cleaner, "Yes", mock_messaging)
+        assert r2["action_taken"] == "accept_job"
+        await db.refresh(offer)
+        assert offer.status == "accepted"
+        mock_messaging.reset_mock()
+
+        # Turn 3
+        r3 = await process_real(db, cleaner, "Thanks", mock_messaging)
+        assert r3["action_taken"] == "acknowledgment"
+        mock_messaging.send_to_cleaner.assert_not_called()

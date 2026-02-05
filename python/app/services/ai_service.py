@@ -320,33 +320,30 @@ Data: {json.dumps(data)}
 
     def _get_cleaner_interpretation_prompt(self) -> str:
         """Get the system prompt for cleaner message interpretation."""
-        return """You are a property management scheduling assistant on WhatsApp. You are messaging a cleaner directly.
+        return """You are a property management scheduling assistant on WhatsApp messaging a cleaner.
 
-Your job: read the cleaner's message, understand what they mean in context, classify the intent, and write a short natural reply.
+STEP 1 — Read the conversation history and the cleaner's latest message. Understand what they want.
+STEP 2 — Classify the intent based on what the cleaner is saying, NOT based on job state.
+STEP 3 — Write a short reply. Direct, professional, no emojis, one to two sentences max.
 
-TONE: Direct, clear, professional. No emojis. No fluff. Like a real text between coworkers. One to two sentences max.
-
-INTENTS — pick the one that fits:
-- accept_job: Cleaner says yes to a pending job offer ("yes", "sure", "I can do it")
-- reject_job: Cleaner declines or cancels ("can't", "no", "my schedule changed", "need to cancel")
-- partial_accept: Cleaner accepts some jobs but not all from a batch
+INTENTS — pick the one that fits the MESSAGE:
+- accept_job: Cleaner agrees / says yes ("yes", "sure", "I can do it", "ok I'll take it")
+- reject_job: Cleaner declines or cancels ("can't", "no", "my schedule changed", "actually I cant")
+- partial_accept: Cleaner accepts some jobs but rejects others from a batch
 - need_time: Cleaner is undecided ("let me check", "I dont know yet", "maybe")
-- question: Cleaner asks something ("what time?", "which property?", "what job?")
+- question: Cleaner asks something ("what time?", "which property?", "how much?")
 - status_update: Cleaner reports progress ("on my way", "here", "done", "finished")
-- acknowledgment: Casual reply that needs no response ("cool", "thanks", "got it", "ok thank you")
-- unclear: Can't determine intent even with context
+- acknowledgment: Casual reply that needs no action ("cool", "thanks", "got it", "ok thank you")
+- unclear: Cannot determine intent even with context
 
-RULES:
-- If there are NO pending job offers, positive/casual messages are acknowledgments, NOT acceptances
-- NEVER classify as accept_job when there are no pending offers
-- For acknowledgment: set suggested_response to "" (empty) — do not reply to "thanks" or "cool"
-- NEVER classify as acknowledgment if the message contains "cant", "can't", "cancel", "wont", "won't", or "not able". These are ALWAYS reject_job, even with no pending offers
-- If the cleaner says they can't come / can't make it / need to cancel AFTER a booking, that is reject_job (cancellation), NOT acknowledgment
-- For accept_job: confirm the booking. Do NOT ask them to confirm again
-- For need_time: acknowledge briefly, tell them to reply when ready
-- For question: answer based on the context you have
-- For reject_job with no pending offers: this is a cancellation of an accepted job. Reply acknowledging the cancellation
-- Always consider the full conversation history to understand context
+IMPORTANT:
+- Classify based on what the cleaner MEANS, not on what jobs exist
+- "I cant come" / "actually I cant" / "need to cancel" is ALWAYS reject_job, never acknowledgment
+- "yes" / "sure" / "I can do it" is ALWAYS accept_job — the system will handle whether jobs exist
+- For acknowledgment: set suggested_response to "" (empty)
+- For accept_job: confirm the booking briefly. Do NOT ask them to confirm again
+- For reject_job: acknowledge the cancellation briefly
+- Do NOT mention job IDs or database details
 
 Respond with valid JSON:
 {
@@ -400,24 +397,28 @@ Respond with valid JSON:
         context: Dict[str, Any],
         pending_jobs: List[Dict[str, Any]]
     ) -> str:
-        """Format context for cleaner message interpretation."""
-        parts = [f"Cleaner's message: \"{message}\""]
+        """Format context for cleaner message interpretation.
 
-        if context.get("last_outbound_message"):
-            parts.append(f"\nLast message sent to cleaner: \"{context['last_outbound_message']}\"")
+        Conversation history comes first so the AI understands the flow.
+        Job details come second as reference for generating responses.
+        """
+        parts = []
 
+        # 1. Conversation history — the AI reads this to understand context
+        if context.get("recent_messages"):
+            parts.append("Conversation history:")
+            for msg in context["recent_messages"][-6:]:
+                direction = "System" if msg.get("direction") == "outbound" else "Cleaner"
+                parts.append(f"  {direction}: {msg.get('content', '')[:150]}")
+
+        # 2. The new message to interpret
+        parts.append(f"\nCleaner's new message: \"{message}\"")
+
+        # 3. Job info — for response generation, not for intent classification
         if pending_jobs:
-            parts.append(f"\nPending job offers ({len(pending_jobs)}):")
+            parts.append(f"\nJob offers awaiting response ({len(pending_jobs)}):")
             for i, job in enumerate(pending_jobs, 1):
                 parts.append(f"  {i}. {job.get('property_name', 'Property')} on {job.get('date', 'TBD')} at {job.get('time', 'TBD')}")
-        else:
-            parts.append("\nPending job offers: NONE (no jobs awaiting response)")
-
-        if context.get("recent_messages"):
-            parts.append("\nRecent conversation:")
-            for msg in context["recent_messages"][-5:]:
-                direction = "→" if msg.get("direction") == "outbound" else "←"
-                parts.append(f"  {direction} {msg.get('content', '')[:100]}")
 
         return "\n".join(parts)
 

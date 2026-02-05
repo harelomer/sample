@@ -244,6 +244,55 @@ async def _identify_sender(
     return "unknown", None, None
 
 
+async def _find_active_job(db: AsyncSession, cleaner_id: int) -> Optional[Job]:
+    """Find a confirmed/active job for a cleaner."""
+    result = await db.execute(
+        select(Job).where(
+            and_(
+                Job.assigned_cleaner_id == cleaner_id,
+                Job.status.in_([
+                    JobStatus.CONFIRMED.value,
+                    JobStatus.EN_ROUTE.value,
+                    JobStatus.IN_PROGRESS.value,
+                ])
+            )
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _cancel_active_job(
+    db: AsyncSession, job: Job, cleaner: Cleaner,
+    job_service: JobService, assignment_service: AssignmentService,
+    message: Message, message_text: str
+):
+    """Cancel an active job: mark offer cancelled, reset job, cascade."""
+    accepted_offer_result = await db.execute(
+        select(JobOffer).where(
+            and_(
+                JobOffer.job_id == job.id,
+                JobOffer.cleaner_id == cleaner.id,
+                JobOffer.status == "accepted"
+            )
+        )
+    )
+    accepted_offer = accepted_offer_result.scalar_one_or_none()
+    if accepted_offer:
+        accepted_offer.status = "cancelled"
+
+    await job_service.update_job_status(
+        job.id, JobStatus.CANCELLED, "cleaner", message_text, message.id
+    )
+    job.status = JobStatus.PENDING.value
+    job.assigned_cleaner_id = None
+    try:
+        cascade_result = await assignment_service.cascade_to_next_cleaner(job)
+        if cascade_result:
+            logger.info(f"Cancelled job {job.id} reassigned to cleaner {cascade_result.get('cleaner_id')}")
+    except Exception as e:
+        logger.error(f"Auto-reassignment failed for cancelled job {job.id}: {e}")
+
+
 async def _process_cleaner_message(
     db: AsyncSession,
     message: Message,
@@ -307,46 +356,30 @@ async def _process_cleaner_message(
         "status_update": interpretation.status_update
     }
 
-    # Take action based on intent
+    # --- Act on intent ---
+    # AI classified what the cleaner wants from the conversation.
+    # Now the handler checks actual job state and decides what to do.
     result = {"action_taken": interpretation.intent, "details": {}}
     response = interpretation.suggested_response or ""
+    intent = interpretation.intent
 
-    # Safety check: override acknowledgment if message contains cancel/reject keywords
-    # Prevents AI from silently swallowing cancellation messages like "Actually I cant sorry"
-    if interpretation.intent == "acknowledgment":
-        import re
-        _cancel_words = {"cant", "can't", "cannot", "cancel", "wont", "won't"}
-        _msg_words = set(re.findall(r"[a-z']+", message_text.lower()))
-        if _cancel_words & _msg_words:
-            logger.info(f"Overriding acknowledgment → reject_job (cancel keywords in: {message_text})")
-            interpretation.intent = "reject_job"
-            if not response:
-                response = "Understood, job cancelled. It will be reassigned."
-
-    # If there are no pending offers, don't process accept/partial intents
-    if not pending_offers and interpretation.intent in ("accept_job", "partial_accept"):
-        logger.info(f"Ignoring '{interpretation.intent}' intent — no pending offers for cleaner {cleaner.id}")
-        result["action_taken"] = "no_action"
-        result["details"]["reason"] = "no_pending_offers"
-        response = "There are no open job offers right now. We'll reach out when something is available."
-
-    elif interpretation.intent == "acknowledgment":
-        logger.info(f"Acknowledgment from cleaner {cleaner.id}: {message_text}")
+    if intent == "acknowledgment":
         result["action_taken"] = "acknowledgment"
-        response = ""  # Don't reply to casual follow-ups
+        response = ""
 
-    elif interpretation.intent == "accept_job":
-        is_confirming_multi = (
+    elif intent == "accept_job":
+        if not pending_offers:
+            result["action_taken"] = "no_action"
+            result["details"]["reason"] = "no_pending_offers"
+            response = "There are no open job offers right now. We'll reach out when something is available."
+        elif len(pending_offers) > 1 and not (
             context and context.conversation_state == "awaiting_multi_job_confirmation"
-        )
-
-        if len(pending_offers) > 1 and not is_confirming_multi:
-            # Multiple pending offers - ask which ones
+        ):
             jobs_desc = ", ".join(
                 f"{j.get('property_name', 'Property')} on {j.get('date', 'TBD')} at {j.get('time', 'TBD')}"
                 for j in pending_jobs
             )
-            confirm_msg = await ai_service.generate_conversational_message(
+            response = await ai_service.generate_conversational_message(
                 "multi_job_confirm",
                 {
                     "cleaner_name": cleaner.name.split()[0] if cleaner.name else "there",
@@ -354,92 +387,42 @@ async def _process_cleaner_message(
                     "jobs_description": jobs_desc,
                 }
             )
-            response = confirm_msg
-
             if context:
                 context.conversation_state = "awaiting_multi_job_confirmation"
                 context.awaiting_response_for = "multi_job_confirmation"
-
             result["action_taken"] = "awaiting_multi_job_confirmation"
             result["details"]["pending_count"] = len(pending_offers)
         else:
-            # Accept all pending offers
             for offer in pending_offers:
                 await job_service.accept_job_offer(offer.id, message_text)
             result["details"]["accepted_offers"] = len(pending_offers)
-
             if context:
                 context.conversation_state = "idle"
                 context.awaiting_response_for = None
 
-    elif interpretation.intent == "reject_job":
+    elif intent == "reject_job":
         if pending_offers:
             for offer in pending_offers:
                 await job_service.reject_job_offer(offer.id, message_text)
-                # Auto-reassign: cascade to next available cleaner
-                job = offer.job
                 try:
-                    cascade_result = await assignment_service.cascade_to_next_cleaner(job)
+                    cascade_result = await assignment_service.cascade_to_next_cleaner(offer.job)
                     if cascade_result:
-                        logger.info(f"Job {job.id} reassigned to cleaner {cascade_result.get('cleaner_id')}")
-                    else:
-                        logger.warning(f"Job {job.id} escalated — no cleaners available")
+                        logger.info(f"Job {offer.job.id} reassigned to cleaner {cascade_result.get('cleaner_id')}")
                 except Exception as e:
-                    logger.error(f"Auto-reassignment failed for job {job.id}: {e}")
+                    logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
             result["details"]["rejected_offers"] = len(pending_offers)
         else:
-            # No pending offers — cancellation of an accepted/active job
-            active_job_result = await db.execute(
-                select(Job).where(
-                    and_(
-                        Job.assigned_cleaner_id == cleaner.id,
-                        Job.status.in_([
-                            JobStatus.CONFIRMED.value,
-                            JobStatus.EN_ROUTE.value,
-                            JobStatus.IN_PROGRESS.value
-                        ])
-                    )
-                )
-            )
-            active_job = active_job_result.scalar_one_or_none()
-
+            # No pending offers — look for an active/confirmed job to cancel
+            active_job = await _find_active_job(db, cleaner.id)
             if active_job:
-                # Mark the original accepted offer as cancelled so this cleaner is excluded from reassignment
-                accepted_offer_result = await db.execute(
-                    select(JobOffer).where(
-                        and_(
-                            JobOffer.job_id == active_job.id,
-                            JobOffer.cleaner_id == cleaner.id,
-                            JobOffer.status == "accepted"
-                        )
-                    )
-                )
-                accepted_offer = accepted_offer_result.scalar_one_or_none()
-                if accepted_offer:
-                    accepted_offer.status = "cancelled"
-
-                await job_service.update_job_status(
-                    active_job.id, JobStatus.CANCELLED, "cleaner", message_text, message.id
-                )
-                # Reset to PENDING so it can be reassigned
-                active_job.status = JobStatus.PENDING.value
-                active_job.assigned_cleaner_id = None
-                try:
-                    cascade_result = await assignment_service.cascade_to_next_cleaner(active_job)
-                    if cascade_result:
-                        logger.info(f"Cancelled job {active_job.id} reassigned to cleaner {cascade_result.get('cleaner_id')}")
-                    else:
-                        logger.warning(f"Cancelled job {active_job.id} escalated — no cleaners available")
-                except Exception as e:
-                    logger.error(f"Auto-reassignment failed for cancelled job {active_job.id}: {e}")
+                await _cancel_active_job(db, active_job, cleaner, job_service, assignment_service, message, message_text)
                 result["action_taken"] = "job_cancelled"
                 result["details"]["job_id"] = active_job.id
             else:
                 result["action_taken"] = "no_action"
                 result["details"]["reason"] = "no_active_jobs"
-                response = ""
 
-    elif interpretation.intent == "partial_accept":
+    elif intent == "partial_accept":
         accepted_positions = interpretation.accepted_job_ids
         rejected_positions = interpretation.rejected_job_ids
 
@@ -458,7 +441,7 @@ async def _process_cleaner_message(
         result["details"]["accepted"] = accepted_positions
         result["details"]["rejected"] = rejected_positions
 
-    elif interpretation.intent == "status_update":
+    elif intent == "status_update":
         status_map = {
             "en_route": JobStatus.EN_ROUTE,
             "arrived": JobStatus.IN_PROGRESS,
@@ -466,23 +449,9 @@ async def _process_cleaner_message(
             "completed": JobStatus.COMPLETED,
             "done": JobStatus.COMPLETED
         }
-
         new_status = status_map.get(interpretation.status_update)
         if new_status:
-            active_job_result = await db.execute(
-                select(Job).where(
-                    and_(
-                        Job.assigned_cleaner_id == cleaner.id,
-                        Job.status.in_([
-                            JobStatus.CONFIRMED.value,
-                            JobStatus.EN_ROUTE.value,
-                            JobStatus.IN_PROGRESS.value
-                        ])
-                    )
-                )
-            )
-            active_job = active_job_result.scalar_one_or_none()
-
+            active_job = await _find_active_job(db, cleaner.id)
             if active_job:
                 await job_service.update_job_status(
                     active_job.id, new_status, "cleaner", message_text, message.id
@@ -490,7 +459,7 @@ async def _process_cleaner_message(
                 result["details"]["job_id"] = active_job.id
                 result["details"]["new_status"] = new_status.value
 
-    elif interpretation.intent == "question":
+    elif intent == "question":
         result["details"]["question_type"] = interpretation.question_type
 
     elif interpretation.needs_clarification:
