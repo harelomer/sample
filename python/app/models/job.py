@@ -53,10 +53,10 @@ class Job(Base, TimestampMixin):
     urgency = Column(String(50), default=JobUrgency.NORMAL.value)
 
     # Scheduling
-    scheduled_date = Column(DateTime, nullable=False, index=True)
+    scheduled_date = Column(DateTime(timezone=True), nullable=False, index=True)
     scheduled_time = Column(String(10))  # "14:00"
     estimated_duration_minutes = Column(Integer, default=120)
-    deadline = Column(DateTime)  # Must be done by (e.g., guest check-in)
+    deadline = Column(DateTime(timezone=True))  # Must be done by (e.g., guest check-in)
 
     # Assignment
     assigned_cleaner_id = Column(Integer, ForeignKey("cleaners.id"), index=True)
@@ -69,12 +69,12 @@ class Job(Base, TimestampMixin):
 
     # Related booking
     guest_id = Column(Integer, ForeignKey("guests.id"), index=True)
-    previous_guest_checkout = Column(DateTime)
-    next_guest_checkin = Column(DateTime)
+    previous_guest_checkout = Column(DateTime(timezone=True))
+    next_guest_checkin = Column(DateTime(timezone=True))
 
     # Execution tracking
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
     actual_duration_minutes = Column(Integer)
 
     # Notes
@@ -130,18 +130,18 @@ class JobOffer(Base, TimestampMixin):
     cleaner_id = Column(Integer, ForeignKey("cleaners.id"), nullable=False, index=True)
 
     # Offer details
-    offered_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    expires_at = Column(DateTime)  # When offer times out
+    offered_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at = Column(DateTime(timezone=True))  # When offer times out
     offered_amount = Column(Float)  # Payment offered
 
     # Response
     status = Column(String(50), default="pending")  # pending, accepted, rejected, expired, cancelled
-    responded_at = Column(DateTime)
+    responded_at = Column(DateTime(timezone=True))
     response_message = Column(Text)  # Original response text
 
     # Tracking
     reminder_count = Column(Integer, default=0)
-    last_reminder_at = Column(DateTime)
+    last_reminder_at = Column(DateTime(timezone=True))
 
     # Part of batch?
     batch_id = Column(String(50), index=True)
@@ -174,7 +174,7 @@ class JobStatusHistory(Base, TimestampMixin):
     # Status change
     from_status = Column(String(50))
     to_status = Column(String(50), nullable=False)
-    changed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    changed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Context
     changed_by = Column(String(50))  # "system", "cleaner", "manager"

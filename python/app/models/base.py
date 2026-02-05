@@ -17,8 +17,8 @@ class Base(DeclarativeBase):
 class TimestampMixin:
     """Mixin for created_at and updated_at timestamps."""
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 # Database engine and session factory
@@ -61,9 +61,14 @@ def get_session_factory():
 
 
 async def init_db():
-    """Initialize database and create all tables."""
+    """Initialize database - drop and recreate all tables.
+
+    Uses drop_all + create_all to ensure schema matches current models.
+    Replace with Alembic migrations when data preservation is needed.
+    """
     engine = get_engine()
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
 

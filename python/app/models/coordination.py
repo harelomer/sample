@@ -68,8 +68,8 @@ class CoordinationEvent(Base, TimestampMixin):
     description = Column(Text)
 
     # For specific event types
-    requested_time = Column(DateTime)  # For early check-in requests
-    original_time = Column(DateTime)  # Original scheduled time
+    requested_time = Column(DateTime(timezone=True))  # For early check-in requests
+    original_time = Column(DateTime(timezone=True))  # Original scheduled time
 
     # Communication tracking
     guest_notified = Column(Boolean, default=False)
@@ -78,7 +78,7 @@ class CoordinationEvent(Base, TimestampMixin):
     cleaner_message_id = Column(Integer)  # Message sent to cleaner
 
     # Resolution
-    resolved_at = Column(DateTime)
+    resolved_at = Column(DateTime(timezone=True))
     resolution_notes = Column(Text)
     resolution_outcome = Column(String(100))  # "approved", "denied", "modified"
 

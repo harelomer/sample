@@ -163,9 +163,11 @@ app.add_middleware(
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler."""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    settings = get_settings()
+    detail = f"{type(exc).__name__}: {exc}" if settings.debug else "Internal server error"
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error"}
+        content={"detail": detail}
     )
 
 

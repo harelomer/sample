@@ -34,8 +34,8 @@ class Guest(Base, TimestampMixin):
     reservation_id = Column(String(100), unique=True, index=True)
 
     # Stay dates
-    check_in_date = Column(DateTime, nullable=False)
-    check_out_date = Column(DateTime, nullable=False)
+    check_in_date = Column(DateTime(timezone=True), nullable=False)
+    check_out_date = Column(DateTime(timezone=True), nullable=False)
     check_in_time = Column(String(10), default="15:00")  # 3 PM default
     check_out_time = Column(String(10), default="11:00")  # 11 AM default
 

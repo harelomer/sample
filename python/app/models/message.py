@@ -71,13 +71,13 @@ class Message(Base, TimestampMixin):
 
     # Processing
     processed = Column(Boolean, default=False)
-    processed_at = Column(DateTime)
+    processed_at = Column(DateTime(timezone=True))
     processing_notes = Column(Text)
 
     # Timestamps
-    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    delivered_at = Column(DateTime)
-    read_at = Column(DateTime)
+    sent_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    delivered_at = Column(DateTime(timezone=True))
+    read_at = Column(DateTime(timezone=True))
 
     # Relationships
     cleaner = relationship("Cleaner", back_populates="messages")
@@ -110,7 +110,7 @@ class ConversationContext(Base, TimestampMixin):
     # Current context
     active_job_offers = Column(JSON, default=list)  # Job offer IDs currently pending
     last_outbound_message = Column(Text)  # What we last said to them
-    last_outbound_at = Column(DateTime)
+    last_outbound_at = Column(DateTime(timezone=True))
     awaiting_response_for = Column(String(100))  # "job_confirmation", "question_answer"
 
     # Batch context
