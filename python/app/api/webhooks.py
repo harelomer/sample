@@ -19,6 +19,7 @@ from app.models.message import Message, ConversationContext, MessageDirection, M
 from app.schemas.webhook import WhatsAppWebhook, AirbnbWebhook, WebhookResponse
 from app.dependencies import get_ai_service, get_messaging_service
 from app.services.job_service import JobService
+from app.services.assignment_service import AssignmentService
 from app.services.coordination_service import CoordinationService
 from app.security import validate_webhook_request, rate_limit, sanitize_message_for_ai
 
@@ -254,6 +255,7 @@ async def _process_cleaner_message(
     ai_service = get_ai_service()
     messaging_service = get_messaging_service()
     job_service = JobService(db)
+    assignment_service = AssignmentService(db)
 
     # Get conversation context
     context_result = await db.execute(
@@ -362,6 +364,16 @@ async def _process_cleaner_message(
         if pending_offers:
             for offer in pending_offers:
                 await job_service.reject_job_offer(offer.id, message_text)
+                # Auto-reassign: cascade to next available cleaner
+                job = offer.job
+                try:
+                    cascade_result = await assignment_service.cascade_to_next_cleaner(job)
+                    if cascade_result:
+                        logger.info(f"Job {job.id} reassigned to cleaner {cascade_result.get('cleaner_id')}")
+                    else:
+                        logger.warning(f"Job {job.id} escalated — no cleaners available")
+                except Exception as e:
+                    logger.error(f"Auto-reassignment failed for job {job.id}: {e}")
             result["details"]["rejected_offers"] = len(pending_offers)
         else:
             # No pending offers — cancellation of an accepted/active job
@@ -383,6 +395,17 @@ async def _process_cleaner_message(
                 await job_service.update_job_status(
                     active_job.id, JobStatus.CANCELLED, "cleaner", message_text, message.id
                 )
+                # Reset to PENDING so it can be reassigned
+                active_job.status = JobStatus.PENDING.value
+                active_job.assigned_cleaner_id = None
+                try:
+                    cascade_result = await assignment_service.cascade_to_next_cleaner(active_job)
+                    if cascade_result:
+                        logger.info(f"Cancelled job {active_job.id} reassigned to cleaner {cascade_result.get('cleaner_id')}")
+                    else:
+                        logger.warning(f"Cancelled job {active_job.id} escalated — no cleaners available")
+                except Exception as e:
+                    logger.error(f"Auto-reassignment failed for cancelled job {active_job.id}: {e}")
                 result["action_taken"] = "job_cancelled"
                 result["details"]["job_id"] = active_job.id
             else:
@@ -400,6 +423,11 @@ async def _process_cleaner_message(
                 await job_service.accept_job_offer(offer.id, message_text)
             elif pos in rejected_positions:
                 await job_service.reject_job_offer(offer.id, message_text)
+                # Auto-reassign rejected jobs from partial accept
+                try:
+                    await assignment_service.cascade_to_next_cleaner(offer.job)
+                except Exception as e:
+                    logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
 
         result["details"]["accepted"] = accepted_positions
         result["details"]["rejected"] = rejected_positions
