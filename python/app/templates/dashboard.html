@@ -631,9 +631,13 @@
                     bootstrap.Modal.getInstance(document.getElementById('propertyModal')).hide();
                     form.reset();
                     loadProperties();
+                } else {
+                    const err = await res.json();
+                    alert('Failed to save property: ' + (err.detail || JSON.stringify(err)));
                 }
             } catch (err) {
                 console.error('Error saving property:', err);
+                alert('Error saving property: ' + err.message);
             }
         }
 
@@ -651,9 +655,13 @@
                     bootstrap.Modal.getInstance(document.getElementById('cleanerModal')).hide();
                     form.reset();
                     loadCleaners();
+                } else {
+                    const err = await res.json();
+                    alert('Failed to save cleaner: ' + (err.detail || JSON.stringify(err)));
                 }
             } catch (err) {
                 console.error('Error saving cleaner:', err);
+                alert('Error saving cleaner: ' + err.message);
             }
         }
 
@@ -672,9 +680,13 @@
                     bootstrap.Modal.getInstance(document.getElementById('jobModal')).hide();
                     form.reset();
                     loadJobs();
+                } else {
+                    const err = await res.json();
+                    alert('Failed to create job: ' + (err.detail || JSON.stringify(err)));
                 }
             } catch (err) {
                 console.error('Error saving job:', err);
+                alert('Error creating job: ' + err.message);
             }
         }
 
@@ -693,9 +705,13 @@
                     bootstrap.Modal.getInstance(document.getElementById('guestModal')).hide();
                     form.reset();
                     loadGuests();
+                } else {
+                    const err = await res.json();
+                    alert('Failed to save guest: ' + (err.detail || JSON.stringify(err)));
                 }
             } catch (err) {
                 console.error('Error saving guest:', err);
+                alert('Error saving guest: ' + err.message);
             }
         }
 
