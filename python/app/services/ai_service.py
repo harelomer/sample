@@ -329,15 +329,18 @@ Data: {json.dumps(data)}
 Your task is to interpret cleaner responses to job offers. Cleaners often respond briefly and informally.
 
 Common response patterns:
-- Acceptance: "ok", "yes", "sure", "I can do it", "confirmed", "👍"
+- Acceptance: "yes", "sure", "I can do it", "confirmed", "👍" (ONLY when responding to a job offer)
 - Rejection: "can't", "no", "not available", "busy", "pass"
 - Partial (for batches): "only 1 and 3", "just the oakland one", "all except friday"
-- Questions: "what time?", "which property?", "how much?"
+- Questions: "what time?", "which property?", "how much?", "what job?"
 - Status updates: "on my way", "here", "started", "done", "finished"
+- Acknowledgment: "cool", "thanks", "ok thanks", "thank you", "sounds good", "great", "got it", "its ok thank you"
+
+IMPORTANT: If there are NO pending job offers listed, casual or positive messages like "cool", "thanks", "ok", "sounds good" are acknowledgments, NOT job acceptances.
 
 You must respond with valid JSON in this exact format:
 {
-    "intent": "accept_job|reject_job|partial_accept|question|status_update|unclear",
+    "intent": "accept_job|reject_job|partial_accept|question|status_update|acknowledgment|unclear",
     "confidence": 0-100,
     "accepted_jobs": [list of job numbers/ids if partial],
     "rejected_jobs": [list of job numbers/ids if partial],
@@ -467,6 +470,7 @@ Respond with valid JSON:
             "partial_accept": "Noted. Assignments updated.",
             "question": "Checking on that. Will follow up shortly.",
             "status_update": "Noted, thank you.",
-            "unclear": "Your message was unclear. Can you take the job? Please reply yes or no."
+            "unclear": "Your message was unclear. Can you take the job? Please reply yes or no.",
+            "acknowledgment": ""
         }
         return fallbacks.get(intent, "Message received.")

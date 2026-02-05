@@ -308,7 +308,19 @@ async def _process_cleaner_message(
     # Take action based on intent
     result = {"action_taken": interpretation.intent, "details": {}}
 
-    if interpretation.intent == "accept_job":
+    # If there are no pending offers, don't process accept/reject/partial intents
+    # — casual messages after a completed booking should not trigger new actions
+    if not pending_offers and interpretation.intent in ("accept_job", "reject_job", "partial_accept"):
+        logger.info(f"Ignoring '{interpretation.intent}' intent — no pending offers for cleaner {cleaner.id}")
+        result["action_taken"] = "no_action"
+        result["details"]["reason"] = "no_pending_offers"
+
+    elif interpretation.intent == "acknowledgment":
+        # Casual follow-up like "cool", "thanks", "got it" — no response needed
+        logger.info(f"Acknowledgment from cleaner {cleaner.id}: {message_text}")
+        result["action_taken"] = "acknowledgment"
+
+    elif interpretation.intent == "accept_job":
         # Check if this is a confirmation of a multi-job prompt
         is_confirming_multi = (
             context and context.conversation_state == "awaiting_multi_job_confirmation"
