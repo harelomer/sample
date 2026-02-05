@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.base import get_db
 from app.models.cleaner import Cleaner
@@ -244,10 +245,12 @@ async def _identify_sender(
     return "unknown", None, None
 
 
-async def _find_active_job(db: AsyncSession, cleaner_id: int) -> Optional[Job]:
-    """Find a confirmed/active job for a cleaner."""
+async def _find_active_jobs(db: AsyncSession, cleaner_id: int) -> list[Job]:
+    """Find all confirmed/active jobs for a cleaner."""
     result = await db.execute(
-        select(Job).where(
+        select(Job)
+        .options(selectinload(Job.rental_property))
+        .where(
             and_(
                 Job.assigned_cleaner_id == cleaner_id,
                 Job.status.in_([
@@ -258,7 +261,17 @@ async def _find_active_job(db: AsyncSession, cleaner_id: int) -> Optional[Job]:
             )
         )
     )
-    return result.scalar_one_or_none()
+    return list(result.scalars().all())
+
+
+def _describe_jobs(jobs: list[Job]) -> str:
+    """Build a human-readable list of jobs for disambiguation."""
+    parts = []
+    for j in jobs:
+        name = j.rental_property.short_name if j.rental_property else f"Job #{j.id}"
+        date = j.scheduled_date.strftime("%A %b %d") if j.scheduled_date else "TBD"
+        parts.append(f"{name} on {date}")
+    return ", ".join(parts)
 
 
 async def _cancel_active_job(
@@ -418,27 +431,8 @@ async def _process_cleaner_message(
                 result["action_taken"] = "no_action"
                 result["details"]["reason"] = "no_pending_offers"
                 response = "There are no open job offers right now. We'll reach out when something is available."
-        elif len(pending_offers) > 1 and not (
-            context and context.conversation_state == "awaiting_multi_job_confirmation"
-        ):
-            jobs_desc = ", ".join(
-                f"{j.get('property_name', 'Property')} on {j.get('date', 'TBD')} at {j.get('time', 'TBD')}"
-                for j in pending_jobs
-            )
-            response = await ai_service.generate_conversational_message(
-                "multi_job_confirm",
-                {
-                    "cleaner_name": cleaner.name.split()[0] if cleaner.name else "there",
-                    "job_count": len(pending_offers),
-                    "jobs_description": jobs_desc,
-                }
-            )
-            if context:
-                context.conversation_state = "awaiting_multi_job_confirmation"
-                context.awaiting_response_for = "multi_job_confirmation"
-            result["action_taken"] = "awaiting_multi_job_confirmation"
-            result["details"]["pending_count"] = len(pending_offers)
         else:
+            # Accept all pending offers — AI already understood the intent
             for offer in pending_offers:
                 await job_service.accept_job_offer(offer.id, message_text)
             result["details"]["accepted_offers"] = len(pending_offers)
@@ -458,12 +452,17 @@ async def _process_cleaner_message(
                     logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
             result["details"]["rejected_offers"] = len(pending_offers)
         else:
-            # No pending offers — look for an active/confirmed job to cancel
-            active_job = await _find_active_job(db, cleaner.id)
-            if active_job:
-                await _cancel_active_job(db, active_job, cleaner, job_service, assignment_service, message, message_text)
+            # No pending offers — look for active/confirmed jobs to cancel
+            active_jobs = await _find_active_jobs(db, cleaner.id)
+            if len(active_jobs) == 1:
+                await _cancel_active_job(db, active_jobs[0], cleaner, job_service, assignment_service, message, message_text)
                 result["action_taken"] = "job_cancelled"
-                result["details"]["job_id"] = active_job.id
+                result["details"]["job_id"] = active_jobs[0].id
+            elif len(active_jobs) > 1:
+                response = f"You have {len(active_jobs)} active jobs: {_describe_jobs(active_jobs)}. Which one can't you do?"
+                result["action_taken"] = "needs_clarification"
+                result["details"]["reason"] = "multiple_active_jobs"
+                result["details"]["active_job_count"] = len(active_jobs)
             else:
                 result["action_taken"] = "no_action"
                 result["details"]["reason"] = "no_active_jobs"
@@ -497,13 +496,18 @@ async def _process_cleaner_message(
         }
         new_status = status_map.get(interpretation.status_update)
         if new_status:
-            active_job = await _find_active_job(db, cleaner.id)
-            if active_job:
+            active_jobs = await _find_active_jobs(db, cleaner.id)
+            if len(active_jobs) == 1:
                 await job_service.update_job_status(
-                    active_job.id, new_status, "cleaner", message_text, message.id
+                    active_jobs[0].id, new_status, "cleaner", message_text, message.id
                 )
-                result["details"]["job_id"] = active_job.id
+                result["details"]["job_id"] = active_jobs[0].id
                 result["details"]["new_status"] = new_status.value
+            elif len(active_jobs) > 1:
+                response = f"You have {len(active_jobs)} active jobs: {_describe_jobs(active_jobs)}. Which one are you updating?"
+                result["action_taken"] = "needs_clarification"
+                result["details"]["reason"] = "multiple_active_jobs"
+                result["details"]["active_job_count"] = len(active_jobs)
 
     elif intent == "question":
         result["details"]["question_type"] = interpretation.question_type

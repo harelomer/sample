@@ -20,7 +20,7 @@ Scenarios covered:
   - Status updates ("On my way", "Done") -> job status changed
   - Question ("What time?") -> response sent
   - Partial accept (accept job 1, reject job 2)
-  - Multiple pending offers -> multi-job confirmation prompt
+  - Multiple pending offers -> accept all directly
   - Unclear message with pending offers -> clarification
   - Reject with no pending and no active jobs -> no action
   - Keyword fallback when OpenAI API fails
@@ -574,11 +574,11 @@ class TestQuestion:
 class TestMultipleOffers:
 
     @pytest.mark.asyncio
-    async def test_accept_two_offers_asks_confirmation(self, db, seed, mock_ai, mock_messaging):
-        """With 2 pending offers, 'Yes' should ask to confirm which ones."""
+    async def test_accept_two_offers_accepts_all(self, db, seed, mock_ai, mock_messaging):
+        """With 2 pending offers, 'Yes' accepts all — AI understood the intent."""
         cleaner = seed["cleaner_a"]
-        await _make_pending_job(db, cleaner_id=1, batch_position=1)
-        await _make_pending_job(db, cleaner_id=1, batch_position=2)
+        job1, offer1 = await _make_pending_job(db, cleaner_id=1, batch_position=1)
+        job2, offer2 = await _make_pending_job(db, cleaner_id=1, batch_position=2)
 
         result = await process(
             db, cleaner, "Yes to all", mock_ai, mock_messaging,
@@ -588,8 +588,13 @@ class TestMultipleOffers:
             ),
         )
 
-        assert result["action_taken"] == "awaiting_multi_job_confirmation"
-        assert result["details"]["pending_count"] == 2
+        assert result["action_taken"] == "accept_job"
+        assert result["details"]["accepted_offers"] == 2
+
+        await db.refresh(offer1)
+        await db.refresh(offer2)
+        assert offer1.status == "accepted"
+        assert offer2.status == "accepted"
 
 
 # --------------------------------------------------------------------------- #
@@ -1518,3 +1523,158 @@ class TestReclaimAfterRejection:
         await db.refresh(job)
         assert job.status == JobStatus.CONFIRMED.value
         assert job.assigned_cleaner_id == cleaner.id
+
+
+# --------------------------------------------------------------------------- #
+# 17. Multiple Active Jobs Ambiguity                                           #
+# --------------------------------------------------------------------------- #
+
+class TestMultipleActiveJobs:
+    """
+    Tests for when a cleaner has 2+ confirmed/active jobs and sends an
+    ambiguous message like 'I can't' or 'Done'.
+
+    The handler must NOT crash (old bug: scalar_one_or_none with 2 rows).
+    Instead it asks the cleaner which job they mean.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_two_active_jobs_asks_which(self, db, seed, mock_ai, mock_messaging):
+        """'I can't' with 2 confirmed jobs -> asks which one to cancel."""
+        cleaner = seed["cleaner_a"]
+        job1, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+        job2, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+
+        result = await process(
+            db, cleaner, "I cant do it", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="reject_job", confidence=85,
+                suggested_response="Understood, job cancelled.",
+            ),
+        )
+
+        assert result["action_taken"] == "needs_clarification"
+        assert result["details"]["reason"] == "multiple_active_jobs"
+        assert result["details"]["active_job_count"] == 2
+        mock_messaging.send_to_cleaner.assert_called_once()
+        sent_text = mock_messaging.send_to_cleaner.call_args[0][1]
+        assert "2 active jobs" in sent_text
+        assert "which one" in sent_text.lower()
+
+        # Neither job cancelled
+        await db.refresh(job1)
+        await db.refresh(job2)
+        assert job1.status == JobStatus.CONFIRMED.value
+        assert job2.status == JobStatus.CONFIRMED.value
+
+    @pytest.mark.asyncio
+    async def test_status_update_with_two_active_jobs_asks_which(self, db, seed, mock_ai, mock_messaging):
+        """'Done' with 2 active jobs -> asks which one is done."""
+        cleaner = seed["cleaner_a"]
+        job1, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+        job2, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+
+        result = await process(
+            db, cleaner, "All done", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="status_update", confidence=95,
+                status_update="completed",
+                suggested_response="Noted, thank you.",
+            ),
+        )
+
+        assert result["action_taken"] == "needs_clarification"
+        assert result["details"]["reason"] == "multiple_active_jobs"
+        assert result["details"]["active_job_count"] == 2
+        mock_messaging.send_to_cleaner.assert_called_once()
+        sent_text = mock_messaging.send_to_cleaner.call_args[0][1]
+        assert "2 active jobs" in sent_text
+
+        # Neither job updated
+        await db.refresh(job1)
+        await db.refresh(job2)
+        assert job1.status == JobStatus.CONFIRMED.value
+        assert job2.status == JobStatus.CONFIRMED.value
+
+    @pytest.mark.asyncio
+    async def test_cancel_single_active_still_works(self, db, seed, mock_ai, mock_messaging):
+        """'I can't' with 1 confirmed job -> cancels normally (no regression)."""
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+
+        result = await process(
+            db, cleaner, "I cant do it", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="reject_job", confidence=85,
+                suggested_response="Understood, job cancelled.",
+            ),
+        )
+
+        assert result["action_taken"] == "job_cancelled"
+        assert result["details"]["job_id"] == job.id
+
+        await db.refresh(offer)
+        assert offer.status == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_status_update_single_active_still_works(self, db, seed, mock_ai, mock_messaging):
+        """'On my way' with 1 confirmed job -> updates normally."""
+        cleaner = seed["cleaner_a"]
+        job, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+
+        result = await process(
+            db, cleaner, "On my way", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="status_update", confidence=95,
+                status_update="en_route",
+                suggested_response="Noted.",
+            ),
+        )
+
+        assert result["action_taken"] == "status_update"
+        assert result["details"]["new_status"] == "en_route"
+        await db.refresh(job)
+        assert job.status == JobStatus.EN_ROUTE.value
+
+    # -- Real-message integration tests --
+
+    @pytest.mark.asyncio
+    async def test_real_msg_cancel_two_active_asks_which(self, db, seed, mock_messaging):
+        """Real message: 'Actually I cant' with 2 jobs -> asks which one."""
+        cleaner = seed["cleaner_a"]
+        job1, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+        job2, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+
+        result = await process_real(db, cleaner, "Actually I cant sorry", mock_messaging)
+
+        assert result["action_taken"] == "needs_clarification"
+        assert result["details"]["reason"] == "multiple_active_jobs"
+
+    @pytest.mark.asyncio
+    async def test_real_msg_done_two_active_asks_which(self, db, seed, mock_messaging):
+        """Real message: 'Done' with 2 active jobs -> asks which one."""
+        cleaner = seed["cleaner_a"]
+        job1, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+        job2, _ = await _make_confirmed_job(db, cleaner_id=cleaner.id, property_id=1)
+
+        result = await process_real(db, cleaner, "Done", mock_messaging)
+
+        assert result["action_taken"] == "needs_clarification"
+        assert result["details"]["reason"] == "multiple_active_jobs"
+
+    @pytest.mark.asyncio
+    async def test_real_msg_yes_two_pending_accepts_both(self, db, seed, mock_messaging):
+        """Real message: 'Yes' with 2 pending offers -> accepts both directly."""
+        cleaner = seed["cleaner_a"]
+        job1, offer1 = await _make_pending_job(db, cleaner_id=1, batch_position=1)
+        job2, offer2 = await _make_pending_job(db, cleaner_id=1, batch_position=2)
+
+        result = await process_real(db, cleaner, "Yes", mock_messaging)
+
+        assert result["action_taken"] == "accept_job"
+        assert result["details"]["accepted_offers"] == 2
+
+        await db.refresh(offer1)
+        await db.refresh(offer2)
+        assert offer1.status == "accepted"
+        assert offer2.status == "accepted"
