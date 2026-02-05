@@ -340,10 +340,12 @@ RULES:
 - If there are NO pending job offers, positive/casual messages are acknowledgments, NOT acceptances
 - NEVER classify as accept_job when there are no pending offers
 - For acknowledgment: set suggested_response to "" (empty) — do not reply to "thanks" or "cool"
+- NEVER classify as acknowledgment if the message contains "cant", "can't", "cancel", "wont", "won't", or "not able". These are ALWAYS reject_job, even with no pending offers
+- If the cleaner says they can't come / can't make it / need to cancel AFTER a booking, that is reject_job (cancellation), NOT acknowledgment
 - For accept_job: confirm the booking. Do NOT ask them to confirm again
 - For need_time: acknowledge briefly, tell them to reply when ready
 - For question: answer based on the context you have
-- For reject_job with no pending offers: this is a cancellation of an accepted job
+- For reject_job with no pending offers: this is a cancellation of an accepted job. Reply acknowledging the cancellation
 - Always consider the full conversation history to understand context
 
 Respond with valid JSON:
