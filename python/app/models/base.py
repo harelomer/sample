@@ -61,14 +61,13 @@ def get_session_factory():
 
 
 async def init_db():
-    """Initialize database - drop and recreate all tables.
+    """Initialize database - create tables if they don't exist.
 
-    Uses drop_all + create_all to ensure schema matches current models.
-    Replace with Alembic migrations when data preservation is needed.
+    Uses create_all which is safe: it only creates tables that are missing.
+    Existing tables and their data are preserved.
     """
     engine = get_engine()
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
 
