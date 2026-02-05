@@ -320,6 +320,16 @@ async def _process_cleaner_message(
         logger.info(f"Acknowledgment from cleaner {cleaner.id}: {message_text}")
         result["action_taken"] = "acknowledgment"
 
+    elif interpretation.intent == "need_time":
+        # Cleaner needs time to decide — acknowledge and wait
+        response = await ai_service.generate_response(
+            context=context_dict.get("last_outbound_message", ""),
+            intent="need_time",
+            data={}
+        )
+        await messaging_service.send_to_cleaner(cleaner, response)
+        result["_outbound_message"] = response
+
     elif interpretation.intent == "accept_job":
         # Check if this is a confirmation of a multi-job prompt
         is_confirming_multi = (
@@ -410,7 +420,7 @@ async def _process_cleaner_message(
                 response = await ai_service.generate_response(
                     context=context_dict.get("last_outbound_message", ""),
                     intent="cancel_job",
-                    data={"job_id": active_job.id}
+                    data={}
                 )
                 await messaging_service.send_to_cleaner(cleaner, response)
                 result["_outbound_message"] = response

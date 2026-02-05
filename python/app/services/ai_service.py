@@ -296,7 +296,8 @@ You are writing TO the cleaner. Never refer to them in third person."""
         prompts = {
             "accept_job": "The cleaner already said yes. Confirm they are booked. Do NOT ask them to confirm again.",
             "reject_job": "The cleaner declined the job. Acknowledge briefly and let them know it will be reassigned.",
-            "cancel_job": "The cleaner is cancelling a job they previously accepted. Acknowledge the cancellation and let them know the job will be reassigned.",
+            "cancel_job": "The cleaner is cancelling a job they previously accepted. Acknowledge the cancellation and let them know the job will be reassigned. Do NOT mention any job IDs or database IDs.",
+            "need_time": "The cleaner needs time to decide. Acknowledge briefly and let them know to reply when ready. One short sentence only.",
             "partial_accept": "The cleaner accepted some jobs and declined others. Confirm which are booked and note the rest will be reassigned.",
             "question": "Answer the cleaner's question based on context.",
             "status_update": "Acknowledge the status update briefly.",
@@ -333,6 +334,7 @@ Common response patterns:
 - Acceptance: "yes", "sure", "I can do it", "confirmed", "👍" (ONLY when responding to a job offer)
 - Rejection/Cancellation: "can't", "no", "not available", "busy", "pass", "my schedule changed", "I cant come clean", "need to cancel"
 - Partial (for batches): "only 1 and 3", "just the oakland one", "all except friday"
+- Need time: "I dont know yet", "let me check", "give me a minute", "not sure yet", "I'll let you know", "maybe"
 - Questions: "what time?", "which property?", "how much?", "what job?"
 - Status updates: "on my way", "here", "started", "done", "finished"
 - Acknowledgment: "cool", "thanks", "ok thanks", "thank you", "sounds good", "great", "got it", "its ok thank you"
@@ -346,7 +348,7 @@ IMPORTANT rules when there are NO pending job offers:
 
 You must respond with valid JSON in this exact format:
 {
-    "intent": "accept_job|reject_job|partial_accept|question|status_update|acknowledgment|unclear",
+    "intent": "accept_job|reject_job|partial_accept|need_time|question|status_update|acknowledgment|unclear",
     "confidence": 0-100,
     "accepted_jobs": [list of job numbers/ids if partial],
     "rejected_jobs": [list of job numbers/ids if partial],
@@ -476,6 +478,7 @@ Respond with valid JSON:
             "accept_job": "Confirmed, you're booked. We'll send details before the job.",
             "reject_job": "Understood. Job will be reassigned.",
             "cancel_job": "Understood, job cancelled. It will be reassigned.",
+            "need_time": "No problem, let us know when you decide.",
             "partial_accept": "Noted. Assignments updated.",
             "question": "Checking on that. Will follow up shortly.",
             "status_update": "Noted, thank you.",
