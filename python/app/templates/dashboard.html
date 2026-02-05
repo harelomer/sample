@@ -400,38 +400,15 @@
     <script>
         const API_BASE = '';
 
-        // API Key management
-        let apiKey = localStorage.getItem('admin_api_key') || '';
+        // API Key - injected server-side, fallback to localStorage
+        const apiKey = (typeof SERVER_API_KEY !== 'undefined' && SERVER_API_KEY) || '';
 
-        function getHeaders(includeJson = false) {
-            const headers = {};
+        function apiFetch(url, options = {}) {
+            const headers = { ...(options.headers || {}) };
             if (apiKey) headers['X-API-Key'] = apiKey;
-            if (includeJson) headers['Content-Type'] = 'application/json';
-            return headers;
-        }
-
-        async function apiFetch(url, options = {}) {
-            options.headers = { ...getHeaders(options.body != null), ...options.headers };
-            const res = await fetch(url, options);
-            if (res.status === 401 || res.status === 503) {
-                promptForApiKey('API key is missing or invalid. Please enter your Admin API Key.');
-                throw new Error('Unauthorized');
-            }
-            return res;
-        }
-
-        function promptForApiKey(message) {
-            const key = prompt(message || 'Enter your Admin API Key:');
-            if (key) {
-                apiKey = key.trim();
-                localStorage.setItem('admin_api_key', apiKey);
-                loadDashboard();
-            }
-        }
-
-        // Prompt on first load if no key stored
-        if (!apiKey) {
-            promptForApiKey('Enter your Admin API Key to access the dashboard:');
+            if (options.body) headers['Content-Type'] = 'application/json';
+            options.headers = headers;
+            return fetch(url, options);
         }
 
         // Navigation

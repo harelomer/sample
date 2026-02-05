@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -191,9 +191,19 @@ app.include_router(guests_router)
 # Root endpoint - serve dashboard
 @app.get("/")
 async def root():
-    """Serve the dashboard UI."""
+    """Serve the dashboard UI with API key injected server-side."""
+    settings = get_settings()
     template_path = Path(__file__).parent / "templates" / "dashboard.html"
-    return FileResponse(template_path, media_type="text/html")
+    html = template_path.read_text()
+    # Inject the API key so the dashboard can authenticate without user input
+    html = html.replace(
+        "const API_BASE = '';",
+        f"const API_BASE = '';\n        const SERVER_API_KEY = '{settings.admin_api_key or ''}';"
+    )
+    return HTMLResponse(
+        content=html,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 
 # API info endpoint
