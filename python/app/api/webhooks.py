@@ -498,17 +498,75 @@ async def _process_cleaner_message(
         accepted_positions = interpretation.accepted_job_ids
         rejected_positions = interpretation.rejected_job_ids
 
+        # Try matching by batch_position first
+        matched_any = False
         for offer in pending_offers:
             pos = offer.batch_position
             if pos in accepted_positions:
                 await job_service.accept_job_offer(offer.id, message_text)
+                matched_any = True
             elif pos in rejected_positions:
                 await job_service.reject_job_offer(offer.id, message_text)
-                # Auto-reassign rejected jobs from partial accept
+                matched_any = True
                 try:
                     await assignment_service.cascade_to_next_cleaner(offer.job)
                 except Exception as e:
                     logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
+
+        # Safety net: AI may have returned date numbers (e.g. 26 for Feb 26)
+        # instead of position numbers. Try matching by day-of-month.
+        if not matched_any and pending_offers and (accepted_positions or rejected_positions):
+            import re
+            # First pass: find which offers match accepted/rejected by date
+            accepted_offers = []
+            rejected_offers = []
+            unmatched_offers = []
+            for offer, job_info in zip(pending_offers, pending_jobs):
+                date_str = job_info.get("date", "")
+                day_match = re.search(r'\b(\d{1,2})\b', date_str)
+                if day_match:
+                    day_num = int(day_match.group(1))
+                    if day_num in accepted_positions:
+                        accepted_offers.append(offer)
+                    elif day_num in rejected_positions:
+                        rejected_offers.append(offer)
+                    else:
+                        unmatched_offers.append(offer)
+                else:
+                    unmatched_offers.append(offer)
+
+            # Only proceed if at least one offer matched by date
+            if accepted_offers or rejected_offers:
+                for offer in accepted_offers:
+                    await job_service.accept_job_offer(offer.id, message_text)
+                for offer in rejected_offers:
+                    await job_service.reject_job_offer(offer.id, message_text)
+                    try:
+                        await assignment_service.cascade_to_next_cleaner(offer.job)
+                    except Exception as e:
+                        logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
+                # Reject unmatched offers if cleaner only accepted specific ones
+                if accepted_offers:
+                    for offer in unmatched_offers:
+                        await job_service.reject_job_offer(offer.id, message_text)
+                        try:
+                            await assignment_service.cascade_to_next_cleaner(offer.job)
+                        except Exception as e:
+                            logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
+                matched_any = True
+
+        # If still nothing matched, ask for clarification
+        if not matched_any and pending_offers:
+            jobs_desc = ", ".join(
+                f"{i + 1}) {j.get('property_name', 'Property')} on {j.get('date', 'TBD')}"
+                for i, j in enumerate(pending_jobs)
+            )
+            response = f"Which job do you want? {jobs_desc}. Reply with the number."
+            result["action_taken"] = "needs_clarification"
+
+        # Always ensure a response for partial_accept
+        if not response and matched_any:
+            response = "Noted. Assignments updated."
 
         result["details"]["accepted"] = accepted_positions
         result["details"]["rejected"] = rejected_positions

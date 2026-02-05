@@ -153,12 +153,12 @@ async def seed(db):
 CHAT_ID = "15551234567@c.us"
 
 
-async def _make_pending_job(db, cleaner_id=1, property_id=1, batch_position=1):
+async def _make_pending_job(db, cleaner_id=1, property_id=1, batch_position=1, scheduled_date=None):
     """Create a job in OFFERED status with a pending offer."""
     job = Job(
         property_id=property_id, job_type="turnover",
         status=JobStatus.OFFERED.value, urgency="normal",
-        scheduled_date=datetime.now(timezone.utc) + timedelta(days=2),
+        scheduled_date=scheduled_date or (datetime.now(timezone.utc) + timedelta(days=2)),
         scheduled_time="10:00", payment_amount=80.0,
         max_assignment_attempts=5, assignment_attempts=1,
     )
@@ -1714,17 +1714,49 @@ class TestPartialAcceptKeywordFallback:
         assert result.accepted_job_ids == [1]
         assert result.rejected_job_ids == [2]
 
-    def test_only_feb_25_asks_which(self):
-        """'Only feb 25' -> can't match date reliably, asks with numbers."""
+    def test_only_feb_25_matches_date(self):
+        """'Only feb 25' -> matches day 25 to job on Feb 25, partial_accept."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
         ]
         result = self._fallback("Only feb 25", jobs)
+        assert result.intent == "partial_accept"
+        assert result.accepted_job_ids == [2]
+        assert result.rejected_job_ids == [1]
+
+    def test_only_the_26_matches_date(self):
+        """'Only the 26' -> matches day 26 to job on Feb 26, partial_accept."""
+        jobs = [
+            {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Wednesday Feb 12"},
+            {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Thursday Feb 26"},
+        ]
+        result = self._fallback("Only the 26", jobs)
+        assert result.intent == "partial_accept"
+        assert result.accepted_job_ids == [2]
+        assert result.rejected_job_ids == [1]
+
+    def test_only_the_12_matches_first_date(self):
+        """'Only the 12' -> matches day 12 to first job, partial_accept."""
+        jobs = [
+            {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Wednesday Feb 12"},
+            {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Thursday Feb 26"},
+        ]
+        result = self._fallback("Only the 12", jobs)
+        assert result.intent == "partial_accept"
+        assert result.accepted_job_ids == [1]
+        assert result.rejected_job_ids == [2]
+
+    def test_only_unmatched_date_asks_which(self):
+        """'Only the 30' with no job on day 30 -> asks with numbers."""
+        jobs = [
+            {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
+            {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
+        ]
+        result = self._fallback("Only the 30", jobs)
         assert result.intent == "unclear"
         assert result.needs_clarification is True
         assert "1)" in result.suggested_response
-        assert "2)" in result.suggested_response
 
     def test_number_reply_picks_job(self):
         """'2' with 2 pending -> partial_accept, accept position 2."""
@@ -1880,15 +1912,16 @@ class TestPartialSignalGuard:
         assert offer2.status == "rejected"
 
     @pytest.mark.asyncio
-    async def test_real_msg_only_feb_asks_which(self, db, seed, mock_messaging):
-        """Real message: 'Only feb 25' -> asks which with numbered list."""
+    async def test_real_msg_only_feb_no_match_asks_which(self, db, seed, mock_messaging):
+        """Real message: 'Only feb 25' when no job has day 25 -> asks which."""
         cleaner = seed["cleaner_a"]
+        # Default scheduled_date is ~2 days from now, NOT on day 25
         job1, offer1 = await _make_pending_job(db, cleaner_id=1, batch_position=1)
         job2, offer2 = await _make_pending_job(db, cleaner_id=1, batch_position=2)
 
         result = await process_real(db, cleaner, "Only feb 25", mock_messaging)
 
-        # Should ask for clarification with numbered list
+        # Date 25 doesn't match any job -> asks for clarification
         mock_messaging.send_to_cleaner.assert_called_once()
         sent_text = mock_messaging.send_to_cleaner.call_args[0][1]
         assert "1)" in sent_text or "2)" in sent_text
@@ -1898,3 +1931,182 @@ class TestPartialSignalGuard:
         await db.refresh(offer2)
         assert offer1.status == "pending"
         assert offer2.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_real_msg_only_the_26_matches_date(self, db, seed, mock_messaging):
+        """Real message: 'Only the 26' when job on Feb 26 exists -> partial_accept."""
+        cleaner = seed["cleaner_a"]
+        feb12 = datetime(2026, 2, 12, 10, 0, tzinfo=timezone.utc)
+        feb26 = datetime(2026, 2, 26, 10, 0, tzinfo=timezone.utc)
+        job1, offer1 = await _make_pending_job(db, cleaner_id=1, batch_position=1, scheduled_date=feb12)
+        job2, offer2 = await _make_pending_job(db, cleaner_id=1, batch_position=2, scheduled_date=feb26)
+
+        result = await process_real(db, cleaner, "Only the 26", mock_messaging)
+
+        assert result["action_taken"] == "partial_accept"
+        mock_messaging.send_to_cleaner.assert_called_once()
+
+        await db.refresh(offer2)
+        assert offer2.status == "accepted"
+        await db.refresh(offer1)
+        assert offer1.status == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_real_msg_only_the_12_matches_date(self, db, seed, mock_messaging):
+        """Real message: 'Only the 12' when job on Feb 12 exists -> partial_accept."""
+        cleaner = seed["cleaner_a"]
+        feb12 = datetime(2026, 2, 12, 10, 0, tzinfo=timezone.utc)
+        feb26 = datetime(2026, 2, 26, 10, 0, tzinfo=timezone.utc)
+        job1, offer1 = await _make_pending_job(db, cleaner_id=1, batch_position=1, scheduled_date=feb12)
+        job2, offer2 = await _make_pending_job(db, cleaner_id=1, batch_position=2, scheduled_date=feb26)
+
+        result = await process_real(db, cleaner, "Only the 12", mock_messaging)
+
+        assert result["action_taken"] == "partial_accept"
+        mock_messaging.send_to_cleaner.assert_called_once()
+
+        await db.refresh(offer1)
+        assert offer1.status == "accepted"
+        await db.refresh(offer2)
+        assert offer2.status == "rejected"
+
+
+# --------------------------------------------------------------------------- #
+# 20. Handler date-matching safety net for partial_accept                       #
+# --------------------------------------------------------------------------- #
+
+class TestPartialAcceptDateMatching:
+    """
+    When AI returns partial_accept with date numbers (e.g. 26 for Feb 26)
+    instead of position numbers, the handler should match by day-of-month.
+    """
+
+    @pytest.mark.asyncio
+    async def test_ai_returns_date_number_handler_matches(self, db, seed, mock_ai, mock_messaging):
+        """AI returns accepted_jobs:[26] for a Feb 26 job -> handler matches by date."""
+        cleaner = seed["cleaner_a"]
+        feb12 = datetime(2026, 2, 12, 10, 0, tzinfo=timezone.utc)
+        feb26 = datetime(2026, 2, 26, 10, 0, tzinfo=timezone.utc)
+        job1, offer1 = await _make_pending_job(db, batch_position=1, scheduled_date=feb12)
+        job2, offer2 = await _make_pending_job(db, batch_position=2, scheduled_date=feb26)
+
+        # AI correctly identified partial_accept but returned the date (26)
+        # instead of the position number (2)
+        result = await process(
+            db, cleaner, "Only the 26", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="partial_accept", confidence=85,
+                accepted_job_ids=[26], rejected_job_ids=[12],
+                suggested_response="Noted, you'll take the Feb 26 job.",
+            ),
+        )
+
+        assert result["action_taken"] == "partial_accept"
+        # Handler matched by date since positions 26/12 don't exist
+        await db.refresh(offer2)
+        assert offer2.status == "accepted"
+        await db.refresh(offer1)
+        assert offer1.status == "rejected"
+        # Response sent
+        mock_messaging.send_to_cleaner.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ai_returns_date_number_accept_only(self, db, seed, mock_ai, mock_messaging):
+        """AI returns accepted_jobs:[26], no rejected_jobs -> accept match, reject others."""
+        cleaner = seed["cleaner_a"]
+        feb12 = datetime(2026, 2, 12, 10, 0, tzinfo=timezone.utc)
+        feb26 = datetime(2026, 2, 26, 10, 0, tzinfo=timezone.utc)
+        job1, offer1 = await _make_pending_job(db, batch_position=1, scheduled_date=feb12)
+        job2, offer2 = await _make_pending_job(db, batch_position=2, scheduled_date=feb26)
+
+        # AI returned accepted_jobs with date number, forgot rejected_jobs
+        result = await process(
+            db, cleaner, "Only the 26", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="partial_accept", confidence=85,
+                accepted_job_ids=[26], rejected_job_ids=[],
+                suggested_response="Noted, you'll take the Feb 26 job.",
+            ),
+        )
+
+        assert result["action_taken"] == "partial_accept"
+        await db.refresh(offer2)
+        assert offer2.status == "accepted"
+        # Other offer should be rejected by default
+        await db.refresh(offer1)
+        assert offer1.status == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_ai_returns_correct_positions(self, db, seed, mock_ai, mock_messaging):
+        """AI returns correct positions [2]/[1] -> handler matches by position directly."""
+        cleaner = seed["cleaner_a"]
+        feb12 = datetime(2026, 2, 12, 10, 0, tzinfo=timezone.utc)
+        feb26 = datetime(2026, 2, 26, 10, 0, tzinfo=timezone.utc)
+        job1, offer1 = await _make_pending_job(db, batch_position=1, scheduled_date=feb12)
+        job2, offer2 = await _make_pending_job(db, batch_position=2, scheduled_date=feb26)
+
+        result = await process(
+            db, cleaner, "Only the 26", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="partial_accept", confidence=90,
+                accepted_job_ids=[2], rejected_job_ids=[1],
+                suggested_response="Noted, you'll take the Feb 26 job.",
+            ),
+        )
+
+        assert result["action_taken"] == "partial_accept"
+        await db.refresh(offer2)
+        assert offer2.status == "accepted"
+        await db.refresh(offer1)
+        assert offer1.status == "rejected"
+
+    @pytest.mark.asyncio
+    async def test_unmatched_positions_sends_clarification(self, db, seed, mock_ai, mock_messaging):
+        """AI returns positions that match nothing -> asks for clarification."""
+        cleaner = seed["cleaner_a"]
+        job1, offer1 = await _make_pending_job(db, batch_position=1)
+        job2, offer2 = await _make_pending_job(db, batch_position=2)
+
+        # AI returned nonsense positions that don't match positions OR dates
+        result = await process(
+            db, cleaner, "Only the special one", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="partial_accept", confidence=60,
+                accepted_job_ids=[99], rejected_job_ids=[],
+                suggested_response="",
+            ),
+        )
+
+        assert result["action_taken"] == "needs_clarification"
+        # Should ask for clarification instead of going silent
+        mock_messaging.send_to_cleaner.assert_called_once()
+        sent_text = mock_messaging.send_to_cleaner.call_args[0][1]
+        assert "which job" in sent_text.lower() or "1)" in sent_text
+
+        # Neither offer touched
+        await db.refresh(offer1)
+        await db.refresh(offer2)
+        assert offer1.status == "pending"
+        assert offer2.status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_partial_accept_empty_response_still_sends(self, db, seed, mock_ai, mock_messaging):
+        """AI returns partial_accept with empty suggested_response -> handler still sends."""
+        cleaner = seed["cleaner_a"]
+        job1, offer1 = await _make_pending_job(db, batch_position=1)
+        job2, offer2 = await _make_pending_job(db, batch_position=2)
+
+        result = await process(
+            db, cleaner, "Only the first one", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="partial_accept", confidence=85,
+                accepted_job_ids=[1], rejected_job_ids=[2],
+                suggested_response="",  # AI forgot to set response
+            ),
+        )
+
+        assert result["action_taken"] == "partial_accept"
+        # Handler should still send a fallback response
+        mock_messaging.send_to_cleaner.assert_called_once()
+        await db.refresh(offer1)
+        assert offer1.status == "accepted"

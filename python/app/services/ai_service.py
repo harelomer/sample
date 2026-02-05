@@ -345,12 +345,18 @@ IMPORTANT:
 - For reject_job: acknowledge the cancellation briefly
 - Do NOT mention job IDs or database details
 
-PARTIAL ACCEPT — when cleaner says "only" + a specific job from a batch:
+PARTIAL ACCEPT — when cleaner picks specific jobs from a batch:
 - "Only the 14", "Only feb 25", "Only the last one", "Just the first one" → partial_accept
-- Look at the numbered job list below to match what the cleaner refers to
-- Fill accepted_jobs with the POSITION NUMBERS (1, 2, 3...) of jobs they WANT
-- Fill rejected_jobs with the POSITION NUMBERS of jobs they DON'T want
-- Example: 2 jobs listed, cleaner says "only the last one" → accepted_jobs: [2], rejected_jobs: [1]
+- The cleaner OFTEN refers to jobs BY DATE ("the 26", "feb 25", "the 14th", "only the 12").
+  You MUST look at the numbered job list, find which job matches that date, and return
+  that job's POSITION NUMBER — NOT the date itself.
+- accepted_jobs and rejected_jobs contain POSITION NUMBERS (1, 2, 3...), NEVER dates.
+- All jobs not accepted must go in rejected_jobs. Never leave any out.
+- ALWAYS set a suggested_response confirming which job is booked.
+- Example: Jobs are "1. Villa on Feb 12" and "2. Lodge on Feb 26".
+  Cleaner says "only the 26". Feb 26 = position 2 → accepted_jobs: [2], rejected_jobs: [1]
+  Cleaner says "only the 12" → Feb 12 = position 1 → accepted_jobs: [1], rejected_jobs: [2]
+  Cleaner says "only the last one" (last in list = 2) → accepted_jobs: [2], rejected_jobs: [1]
 - If cleaner says "yes" AFTER previously saying "only X" in the conversation, treat as CONFIRMING
   the partial choice — classify as partial_accept, not accept_job
 
@@ -427,7 +433,9 @@ Respond with valid JSON:
         if pending_jobs:
             parts.append(f"\nJob offers awaiting response ({len(pending_jobs)}):")
             for i, job in enumerate(pending_jobs, 1):
-                parts.append(f"  {i}. {job.get('property_name', 'Property')} on {job.get('date', 'TBD')} at {job.get('time', 'TBD')}")
+                parts.append(f"  Position {i}: {job.get('property_name', 'Property')} on {job.get('date', 'TBD')} at {job.get('time', 'TBD')}")
+            if len(pending_jobs) > 1:
+                parts.append("  (Use position numbers 1, 2, ... in accepted_jobs/rejected_jobs — not dates)")
 
         return "\n".join(parts)
 
@@ -520,7 +528,24 @@ Respond with valid JSON:
                     suggested_response="Confirmed for the first job. The other will be reassigned."
                 )
             else:
-                # "only feb 25" / "only the 14" — can't match reliably, ask with numbers
+                # "only the 26" / "only feb 25" — try to match a number in the
+                # message to a day-of-month in the pending jobs
+                nums_in_msg = re.findall(r'\d+', msg)
+                if nums_in_msg:
+                    for num_str in nums_in_msg:
+                        num = int(num_str)
+                        for i, j in enumerate(pending_jobs):
+                            date_str = j.get("date", "")
+                            day_match = re.search(r'\b(\d{1,2})\b', date_str)
+                            if day_match and int(day_match.group(1)) == num:
+                                matched_pos = positions[i]
+                                return AIInterpretation(
+                                    intent="partial_accept", confidence=75,
+                                    accepted_job_ids=[matched_pos],
+                                    rejected_job_ids=[p for p in positions if p != matched_pos],
+                                    suggested_response=f"Confirmed for the {date_str} job. The other will be reassigned."
+                                )
+                # Could not match — ask with numbers
                 jobs_list = ", ".join(
                     f"{i + 1}) {j.get('property_name', 'Job')} on {j.get('date', 'TBD')}"
                     for i, j in enumerate(pending_jobs)
