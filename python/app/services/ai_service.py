@@ -294,12 +294,12 @@ No emojis. No markdown. Keep it short.
 You are writing TO the cleaner. Never refer to them in third person."""
 
         prompts = {
-            "accept_job": "Generate a confirmation message for accepted cleaning job(s).",
-            "reject_job": "Generate an understanding response for declined job.",
-            "partial_accept": "Generate response confirming some jobs and noting others will be reassigned.",
+            "accept_job": "The cleaner already said yes. Confirm they are booked. Do NOT ask them to confirm again.",
+            "reject_job": "The cleaner declined the job. Acknowledge briefly and let them know it will be reassigned.",
+            "partial_accept": "The cleaner accepted some jobs and declined others. Confirm which are booked and note the rest will be reassigned.",
             "question": "Answer the cleaner's question based on context.",
-            "status_update": "Acknowledge the status update.",
-            "unclear": "Ask for clarification politely."
+            "status_update": "Acknowledge the status update briefly.",
+            "unclear": "Ask the cleaner to clarify: can they take the job? Yes or no."
         }
 
         user_prompt = f"""Context: {context}
@@ -462,7 +462,7 @@ Respond with valid JSON:
     def _get_fallback_response(self, intent: str) -> str:
         """Get fallback response when AI generation fails."""
         fallbacks = {
-            "accept_job": "Confirmed. You're booked.",
+            "accept_job": "Confirmed, you're booked. We'll send details before the job.",
             "reject_job": "Understood. Job will be reassigned.",
             "partial_accept": "Noted. Assignments updated.",
             "question": "Checking on that. Will follow up shortly.",
