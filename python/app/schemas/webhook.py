@@ -2,69 +2,73 @@
 
 from datetime import datetime
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # WhatsApp (Green API) Webhook Schemas
 
 class WhatsAppSenderData(BaseModel):
     """Sender data from WhatsApp webhook."""
-    chatId: str
-    sender: str
+    model_config = ConfigDict(extra="allow")
+
+    chatId: Optional[str] = None
+    sender: Optional[str] = None
     senderName: Optional[str] = None
+    chatName: Optional[str] = None
 
 
 class WhatsAppTextMessageData(BaseModel):
     """Text message data from WhatsApp."""
-    textMessage: str
+    model_config = ConfigDict(extra="allow")
+
+    textMessage: Optional[str] = None
+
+
+class WhatsAppExtendedTextMessageData(BaseModel):
+    """Extended text message data."""
+    model_config = ConfigDict(extra="allow")
+
+    text: Optional[str] = None
 
 
 class WhatsAppMessageData(BaseModel):
     """Message data from WhatsApp webhook."""
-    typeMessage: str
+    model_config = ConfigDict(extra="allow")
+
+    typeMessage: Optional[str] = None
     textMessageData: Optional[WhatsAppTextMessageData] = None
-    # Can extend for other message types (image, location, etc.)
+    extendedTextMessageData: Optional[WhatsAppExtendedTextMessageData] = None
 
 
 class WhatsAppWebhook(BaseModel):
     """
     WhatsApp webhook payload from Green API.
-
-    Example:
-    {
-        "typeWebhook": "incomingMessageReceived",
-        "instanceData": {...},
-        "timestamp": 1234567890,
-        "idMessage": "msg_123",
-        "senderData": {
-            "chatId": "15551234567@c.us",
-            "sender": "15551234567@c.us",
-            "senderName": "Maria"
-        },
-        "messageData": {
-            "typeMessage": "textMessage",
-            "textMessageData": {
-                "textMessage": "ok"
-            }
-        }
-    }
+    Made flexible to handle various Green API formats.
     """
-    typeWebhook: str
+    model_config = ConfigDict(extra="allow")
+
+    typeWebhook: Optional[str] = None
     instanceData: Optional[Dict[str, Any]] = None
     timestamp: Optional[int] = None
     idMessage: Optional[str] = None
-    senderData: WhatsAppSenderData
-    messageData: WhatsAppMessageData
+    senderData: Optional[WhatsAppSenderData] = None
+    messageData: Optional[WhatsAppMessageData] = None
 
     @property
     def chat_id(self) -> str:
         """Get normalized chat ID."""
-        return self.senderData.chatId
+        if self.senderData and self.senderData.chatId:
+            return self.senderData.chatId
+        if self.senderData and self.senderData.sender:
+            return self.senderData.sender
+        return ""
 
     @property
     def sender_phone(self) -> str:
         """Extract phone number from sender."""
-        sender = self.senderData.sender
+        sender = ""
+        if self.senderData:
+            sender = self.senderData.sender or self.senderData.chatId or ""
         # Remove @c.us suffix
         if "@" in sender:
             return sender.split("@")[0]
@@ -73,8 +77,14 @@ class WhatsAppWebhook(BaseModel):
     @property
     def message_text(self) -> Optional[str]:
         """Get message text if it's a text message."""
-        if self.messageData.typeMessage == "textMessage" and self.messageData.textMessageData:
+        if not self.messageData:
+            return None
+        # Try regular text message
+        if self.messageData.textMessageData and self.messageData.textMessageData.textMessage:
             return self.messageData.textMessageData.textMessage
+        # Try extended text message
+        if self.messageData.extendedTextMessageData and self.messageData.extendedTextMessageData.text:
+            return self.messageData.extendedTextMessageData.text
         return None
 
 
