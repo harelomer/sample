@@ -20,6 +20,8 @@ services:
         sync: false
       - key: GREEN_API_TOKEN
         sync: false
+      - key: GREEN_API_HOST
+        sync: false
       - key: DEBUG
         value: false
 
