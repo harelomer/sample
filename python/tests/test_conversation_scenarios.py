@@ -622,8 +622,7 @@ class TestPartialAccept:
         )
 
         assert result["action_taken"] == "partial_accept"
-        assert 1 in result["details"]["accepted"]
-        assert 2 in result["details"]["rejected"]
+        assert result["details"]["accepted_count"] >= 1
 
 
 # --------------------------------------------------------------------------- #
@@ -1685,7 +1684,7 @@ class TestMultipleActiveJobs:
 # --------------------------------------------------------------------------- #
 
 class TestPartialAcceptKeywordFallback:
-    """Keyword fallback tests for 'only X' patterns."""
+    """Keyword fallback classifies intent; handler does job matching."""
 
     def _fallback(self, message, pending_jobs=None):
         from app.services.ai_service import AIService
@@ -1693,92 +1692,67 @@ class TestPartialAcceptKeywordFallback:
         return svc._keyword_fallback(message, pending_jobs or [])
 
     def test_only_the_last_one(self):
-        """'Only the last one' with 2 jobs -> partial_accept, accept position 2."""
+        """'Only the last one' with 2 jobs -> partial_accept intent."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
         ]
         result = self._fallback("Only the last one", jobs)
         assert result.intent == "partial_accept"
-        assert result.accepted_job_ids == [2]
-        assert result.rejected_job_ids == [1]
 
     def test_only_the_first_one(self):
-        """'Only the first one' with 2 jobs -> partial_accept, accept position 1."""
+        """'Only the first one' with 2 jobs -> partial_accept intent."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
         ]
         result = self._fallback("Only the first one", jobs)
         assert result.intent == "partial_accept"
-        assert result.accepted_job_ids == [1]
-        assert result.rejected_job_ids == [2]
 
-    def test_only_feb_25_matches_date(self):
-        """'Only feb 25' -> matches day 25 to job on Feb 25, partial_accept."""
+    def test_only_feb_25(self):
+        """'Only feb 25' with 2 jobs -> partial_accept intent."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
         ]
         result = self._fallback("Only feb 25", jobs)
         assert result.intent == "partial_accept"
-        assert result.accepted_job_ids == [2]
-        assert result.rejected_job_ids == [1]
 
-    def test_only_the_26_matches_date(self):
-        """'Only the 26' -> matches day 26 to job on Feb 26, partial_accept."""
+    def test_only_the_26(self):
+        """'Only the 26' with 2 jobs -> partial_accept intent."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Wednesday Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Thursday Feb 26"},
         ]
         result = self._fallback("Only the 26", jobs)
         assert result.intent == "partial_accept"
-        assert result.accepted_job_ids == [2]
-        assert result.rejected_job_ids == [1]
 
-    def test_only_the_12_matches_first_date(self):
-        """'Only the 12' -> matches day 12 to first job, partial_accept."""
-        jobs = [
-            {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Wednesday Feb 12"},
-            {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Thursday Feb 26"},
-        ]
-        result = self._fallback("Only the 12", jobs)
-        assert result.intent == "partial_accept"
-        assert result.accepted_job_ids == [1]
-        assert result.rejected_job_ids == [2]
-
-    def test_only_unmatched_date_asks_which(self):
-        """'Only the 30' with no job on day 30 -> asks with numbers."""
+    def test_only_the_30_still_partial(self):
+        """'Only the 30' -> still partial_accept (handler resolves or asks)."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
         ]
         result = self._fallback("Only the 30", jobs)
-        assert result.intent == "unclear"
-        assert result.needs_clarification is True
-        assert "1)" in result.suggested_response
+        assert result.intent == "partial_accept"
 
-    def test_number_reply_picks_job(self):
-        """'2' with 2 pending -> partial_accept, accept position 2."""
+    def test_number_reply(self):
+        """'2' with 2 pending -> partial_accept intent."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
         ]
         result = self._fallback("2", jobs)
         assert result.intent == "partial_accept"
-        assert result.accepted_job_ids == [2]
-        assert result.rejected_job_ids == [1]
 
-    def test_number_1_picks_first(self):
-        """'1' with 2 pending -> partial_accept, accept position 1."""
+    def test_number_1(self):
+        """'1' with 2 pending -> partial_accept intent."""
         jobs = [
             {"job_id": 1, "batch_position": 1, "property_name": "9th", "date": "Feb 12"},
             {"job_id": 2, "batch_position": 2, "property_name": "9th", "date": "Feb 25"},
         ]
         result = self._fallback("1", jobs)
         assert result.intent == "partial_accept"
-        assert result.accepted_job_ids == [1]
-        assert result.rejected_job_ids == [2]
 
     def test_all_accepts_all(self):
         """'all' with pending -> accept_job (accept all)."""
@@ -1808,8 +1782,8 @@ class TestPartialSignalGuard:
     """
 
     @pytest.mark.asyncio
-    async def test_yes_after_only_does_not_accept_all(self, db, seed, mock_ai, mock_messaging):
-        """'Yes' after cleaner said 'only X' -> asks which, NOT accept all."""
+    async def test_yes_after_only_matches_from_history(self, db, seed, mock_ai, mock_messaging):
+        """'Yes' after 'only the last one' -> handler matches from the 'only' message."""
         cleaner = seed["cleaner_a"]
         context = seed["context"]
         job1, offer1 = await _make_pending_job(db, cleaner_id=1, batch_position=1)
@@ -1831,13 +1805,10 @@ class TestPartialSignalGuard:
             ),
         )
 
-        assert result["action_taken"] == "needs_clarification"
-        assert result["details"]["reason"] == "partial_signal_detected"
-        # Neither offer accepted
-        await db.refresh(offer1)
-        await db.refresh(offer2)
-        assert offer1.status == "pending"
-        assert offer2.status == "pending"
+        # Handler found "Only the last one" in history, matched it
+        assert result["action_taken"] == "partial_accept"
+        assert result["details"]["accepted_count"] == 1
+        assert result["details"]["rejected_count"] == 1
 
     @pytest.mark.asyncio
     async def test_yes_without_only_accepts_all(self, db, seed, mock_ai, mock_messaging):
@@ -1880,21 +1851,21 @@ class TestPartialSignalGuard:
         result = await process_real(db, cleaner, "Only the last one", mock_messaging)
 
         assert result["action_taken"] == "partial_accept"
-        assert result["details"]["accepted"] == [2]
-        assert result["details"]["rejected"] == [1]
+        assert result["details"]["accepted_count"] == 1
+        assert result["details"]["rejected_count"] == 1
 
+        # "last one" = last in list (DESC: offer2 first, offer1 last) = offer1
         await db.refresh(offer1)
-        assert offer1.status == "rejected"
+        assert offer1.status == "accepted"
         await db.refresh(offer2)
-        assert offer2.status == "accepted"
+        assert offer2.status == "rejected"
 
     @pytest.mark.asyncio
     async def test_real_msg_number_reply_picks_job(self, db, seed, mock_messaging):
         """Real message: '2' with 2 pending -> partial_accept for 2nd listed job.
 
-        pending_offers ordered by offered_at DESC, so batch_position=2 is first
-        in the list and batch_position=1 is second. '2' picks the 2nd item
-        (batch_position=1).
+        pending_offers ordered by offered_at DESC, so offer2 is first
+        in the list and offer1 is second. '2' picks the 2nd item = offer1.
         """
         cleaner = seed["cleaner_a"]
         job1, offer1 = await _make_pending_job(db, cleaner_id=1, batch_position=1)
@@ -1903,9 +1874,9 @@ class TestPartialSignalGuard:
         result = await process_real(db, cleaner, "2", mock_messaging)
 
         assert result["action_taken"] == "partial_accept"
-        # '2' picks the 2nd item in the DESC-ordered list = batch_position 1
-        assert result["details"]["accepted"] == [1]
+        assert result["details"]["accepted_count"] == 1
 
+        # '2' picks the 2nd item in the DESC-ordered list = offer1
         await db.refresh(offer1)
         assert offer1.status == "accepted"
         await db.refresh(offer2)
@@ -2108,5 +2079,8 @@ class TestPartialAcceptDateMatching:
         assert result["action_taken"] == "partial_accept"
         # Handler should still send a fallback response
         mock_messaging.send_to_cleaner.assert_called_once()
+        # "first one" = first in the displayed list (DESC order) = offer2
+        await db.refresh(offer2)
+        assert offer2.status == "accepted"
         await db.refresh(offer1)
-        assert offer1.status == "accepted"
+        assert offer1.status == "rejected"

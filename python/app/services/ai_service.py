@@ -345,19 +345,19 @@ IMPORTANT:
 - For reject_job: acknowledge the cancellation briefly
 - Do NOT mention job IDs or database details
 
-PARTIAL ACCEPT — when cleaner picks specific jobs from a batch:
-- "Only the 14", "Only feb 25", "Only the last one", "Just the first one" → partial_accept
-- The cleaner OFTEN refers to jobs BY DATE ("the 26", "feb 25", "the 14th", "only the 12").
-  You MUST look at the numbered job list, find which job matches that date, and return
-  that job's POSITION NUMBER — NOT the date itself.
-- accepted_jobs and rejected_jobs contain POSITION NUMBERS (1, 2, 3...), NEVER dates.
-- All jobs not accepted must go in rejected_jobs. Never leave any out.
-- ALWAYS set a suggested_response confirming which job is booked.
-- Example: Jobs are "1. Villa on Feb 12" and "2. Lodge on Feb 26".
-  Cleaner says "only the 26". Feb 26 = position 2 → accepted_jobs: [2], rejected_jobs: [1]
-  Cleaner says "only the 12" → Feb 12 = position 1 → accepted_jobs: [1], rejected_jobs: [2]
-  Cleaner says "only the last one" (last in list = 2) → accepted_jobs: [2], rejected_jobs: [1]
-- If cleaner says "yes" AFTER previously saying "only X" in the conversation, treat as CONFIRMING
+PARTIAL ACCEPT — when cleaner accepts some but not all jobs from a batch:
+- "Only the 14", "Only feb 25", "Only the last one", "only next week" → partial_accept
+- accepted_jobs: list of DAY-OF-MONTH numbers for jobs they WANT (e.g. [26] for Feb 26)
+- rejected_jobs: list of DAY-OF-MONTH numbers for jobs they DON'T want (e.g. [12] for Feb 12)
+- For relative references ("next week", "the last one", "the Tuesday one"), resolve to the
+  actual date from the job list below and return its day-of-month number
+- All jobs not accepted must go in rejected_jobs
+- ALWAYS set a suggested_response confirming which job is booked
+- Example: Jobs are "Villa on Feb 12" and "Lodge on Feb 26".
+  "only the 26" → accepted_jobs: [26], rejected_jobs: [12]
+  "only next week" (and Feb 12 is next week) → accepted_jobs: [12], rejected_jobs: [26]
+  "only the last one" (Feb 26 is last) → accepted_jobs: [26], rejected_jobs: [12]
+- If cleaner says "yes" AFTER previously saying "only X", treat as CONFIRMING
   the partial choice — classify as partial_accept, not accept_job
 
 Respond with valid JSON:
@@ -429,13 +429,11 @@ Respond with valid JSON:
         # 2. The new message to interpret
         parts.append(f"\nCleaner's new message: \"{message}\"")
 
-        # 3. Job info — for response generation, not for intent classification
+        # 3. Job info — for response generation and date resolution
         if pending_jobs:
             parts.append(f"\nJob offers awaiting response ({len(pending_jobs)}):")
-            for i, job in enumerate(pending_jobs, 1):
-                parts.append(f"  Position {i}: {job.get('property_name', 'Property')} on {job.get('date', 'TBD')} at {job.get('time', 'TBD')}")
-            if len(pending_jobs) > 1:
-                parts.append("  (Use position numbers 1, 2, ... in accepted_jobs/rejected_jobs — not dates)")
+            for job in pending_jobs:
+                parts.append(f"  - {job.get('property_name', 'Property')} on {job.get('date', 'TBD')} at {job.get('time', 'TBD')}")
 
         return "\n".join(parts)
 
@@ -509,64 +507,19 @@ Respond with valid JSON:
             return word in words
 
         # Partial accept — "only" patterns with multiple pending jobs
+        # Just classify intent; the handler does all job matching.
         if has_word("only") and has_pending and len(pending_jobs) > 1:
-            positions = [j.get("batch_position", i + 1) for i, j in enumerate(pending_jobs)]
-            if has_phrase("last one") or has_phrase("the last"):
-                last_pos = max(positions)
-                return AIInterpretation(
-                    intent="partial_accept", confidence=70,
-                    accepted_job_ids=[last_pos],
-                    rejected_job_ids=[p for p in positions if p != last_pos],
-                    suggested_response="Confirmed for the last job. The other will be reassigned."
-                )
-            elif has_phrase("first one") or has_phrase("the first"):
-                first_pos = min(positions)
-                return AIInterpretation(
-                    intent="partial_accept", confidence=70,
-                    accepted_job_ids=[first_pos],
-                    rejected_job_ids=[p for p in positions if p != first_pos],
-                    suggested_response="Confirmed for the first job. The other will be reassigned."
-                )
-            else:
-                # "only the 26" / "only feb 25" — try to match a number in the
-                # message to a day-of-month in the pending jobs
-                nums_in_msg = re.findall(r'\d+', msg)
-                if nums_in_msg:
-                    for num_str in nums_in_msg:
-                        num = int(num_str)
-                        for i, j in enumerate(pending_jobs):
-                            date_str = j.get("date", "")
-                            day_match = re.search(r'\b(\d{1,2})\b', date_str)
-                            if day_match and int(day_match.group(1)) == num:
-                                matched_pos = positions[i]
-                                return AIInterpretation(
-                                    intent="partial_accept", confidence=75,
-                                    accepted_job_ids=[matched_pos],
-                                    rejected_job_ids=[p for p in positions if p != matched_pos],
-                                    suggested_response=f"Confirmed for the {date_str} job. The other will be reassigned."
-                                )
-                # Could not match — ask with numbers
-                jobs_list = ", ".join(
-                    f"{i + 1}) {j.get('property_name', 'Job')} on {j.get('date', 'TBD')}"
-                    for i, j in enumerate(pending_jobs)
-                )
-                return AIInterpretation(
-                    intent="unclear", confidence=40, needs_clarification=True,
-                    suggested_response=f"Which job do you want? {jobs_list}. Reply with the number."
-                )
+            return AIInterpretation(
+                intent="partial_accept", confidence=70,
+                suggested_response=""  # handler generates response after matching
+            )
 
         # Number-only reply — cleaner picking a job from a numbered list
         if msg.strip().isdigit() and has_pending and len(pending_jobs) > 1:
-            num = int(msg.strip())
-            positions = [j.get("batch_position", i + 1) for i, j in enumerate(pending_jobs)]
-            if 1 <= num <= len(pending_jobs):
-                accepted_pos = positions[num - 1]
-                return AIInterpretation(
-                    intent="partial_accept", confidence=75,
-                    accepted_job_ids=[accepted_pos],
-                    rejected_job_ids=[p for p in positions if p != accepted_pos],
-                    suggested_response=f"Confirmed for job {num}. The other will be reassigned."
-                )
+            return AIInterpretation(
+                intent="partial_accept", confidence=75,
+                suggested_response=""  # handler generates response after matching
+            )
 
         # Check rejection FIRST (before acceptance) — "no" / "cant" should reject
         reject_phrases = ["cant come", "can't come", "schedule changed",

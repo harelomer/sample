@@ -348,6 +348,38 @@ def _match_jobs_from_message(
     return {"accepted": [], "rejected": [], "matched": False}
 
 
+def _match_by_day_numbers(
+    day_numbers: list[int],
+    pending_offers: list,
+    pending_jobs: list[dict],
+) -> dict:
+    """
+    Match day-of-month numbers (from AI) against pending job dates.
+
+    The AI returns accepted_jobs/rejected_jobs as day-of-month numbers
+    (e.g. [26] for Feb 26).  This resolves those to actual offers.
+    """
+    n = len(pending_offers)
+    if not day_numbers or n == 0:
+        return {"accepted": [], "rejected": [], "matched": False}
+
+    day_set = set(day_numbers)
+    accepted_indices = set()
+
+    for i, job_info in enumerate(pending_jobs):
+        date_str = job_info.get("date", "")
+        day_match = re.search(r'\b(\d{1,2})\b', date_str)
+        if day_match and int(day_match.group(1)) in day_set:
+            accepted_indices.add(i)
+
+    if accepted_indices:
+        accepted = [pending_offers[i] for i in sorted(accepted_indices)]
+        rejected = [pending_offers[i] for i in range(n) if i not in accepted_indices]
+        return {"accepted": accepted, "rejected": rejected, "matched": True}
+
+    return {"accepted": [], "rejected": [], "matched": False}
+
+
 def _build_numbered_list(pending_jobs: list[dict]) -> str:
     """Build a numbered list of jobs for clarification messages."""
     return ", ".join(
@@ -595,81 +627,33 @@ async def _process_cleaner_message(
                 result["details"]["reason"] = "no_active_jobs"
 
     elif intent == "partial_accept":
-        accepted_positions = interpretation.accepted_job_ids
-        rejected_positions = interpretation.rejected_job_ids
+        # Layer 1: deterministic matching from the cleaner's actual message
+        match = _match_jobs_from_message(message_text, pending_offers, pending_jobs)
 
-        # Try matching by batch_position first
-        matched_any = False
-        for offer in pending_offers:
-            pos = offer.batch_position
-            if pos in accepted_positions:
+        # Layer 2: AI's resolved day-of-month numbers (handles "next week", etc.)
+        if not match["matched"] and interpretation.accepted_job_ids:
+            match = _match_by_day_numbers(
+                interpretation.accepted_job_ids, pending_offers, pending_jobs
+            )
+
+        if match["matched"]:
+            for offer in match["accepted"]:
                 await job_service.accept_job_offer(offer.id, message_text)
-                matched_any = True
-            elif pos in rejected_positions:
+            for offer in match["rejected"]:
                 await job_service.reject_job_offer(offer.id, message_text)
-                matched_any = True
                 try:
                     await assignment_service.cascade_to_next_cleaner(offer.job)
                 except Exception as e:
                     logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
-
-        # Safety net: AI may have returned date numbers (e.g. 26 for Feb 26)
-        # instead of position numbers. Try matching by day-of-month.
-        if not matched_any and pending_offers and (accepted_positions or rejected_positions):
-            import re
-            # First pass: find which offers match accepted/rejected by date
-            accepted_offers = []
-            rejected_offers = []
-            unmatched_offers = []
-            for offer, job_info in zip(pending_offers, pending_jobs):
-                date_str = job_info.get("date", "")
-                day_match = re.search(r'\b(\d{1,2})\b', date_str)
-                if day_match:
-                    day_num = int(day_match.group(1))
-                    if day_num in accepted_positions:
-                        accepted_offers.append(offer)
-                    elif day_num in rejected_positions:
-                        rejected_offers.append(offer)
-                    else:
-                        unmatched_offers.append(offer)
-                else:
-                    unmatched_offers.append(offer)
-
-            # Only proceed if at least one offer matched by date
-            if accepted_offers or rejected_offers:
-                for offer in accepted_offers:
-                    await job_service.accept_job_offer(offer.id, message_text)
-                for offer in rejected_offers:
-                    await job_service.reject_job_offer(offer.id, message_text)
-                    try:
-                        await assignment_service.cascade_to_next_cleaner(offer.job)
-                    except Exception as e:
-                        logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
-                # Reject unmatched offers if cleaner only accepted specific ones
-                if accepted_offers:
-                    for offer in unmatched_offers:
-                        await job_service.reject_job_offer(offer.id, message_text)
-                        try:
-                            await assignment_service.cascade_to_next_cleaner(offer.job)
-                        except Exception as e:
-                            logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
-                matched_any = True
-
-        # If still nothing matched, ask for clarification
-        if not matched_any and pending_offers:
-            jobs_desc = ", ".join(
-                f"{i + 1}) {j.get('property_name', 'Property')} on {j.get('date', 'TBD')}"
-                for i, j in enumerate(pending_jobs)
-            )
+            result["details"]["accepted_count"] = len(match["accepted"])
+            result["details"]["rejected_count"] = len(match["rejected"])
+            if not response:
+                response = "Noted. Assignments updated."
+        else:
+            # Neither matcher could resolve — ask for clarification
+            jobs_desc = _build_numbered_list(pending_jobs)
             response = f"Which job do you want? {jobs_desc}. Reply with the number."
             result["action_taken"] = "needs_clarification"
-
-        # Always ensure a response for partial_accept
-        if not response and matched_any:
-            response = "Noted. Assignments updated."
-
-        result["details"]["accepted"] = accepted_positions
-        result["details"]["rejected"] = rejected_positions
 
     elif intent == "status_update":
         status_map = {
