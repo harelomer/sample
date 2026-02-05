@@ -1,11 +1,14 @@
 """Job CRUD API endpoints."""
 
+import logging
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+logger = logging.getLogger(__name__)
 
 from app.models.base import get_db
 from app.models.job import Job, JobOffer, JobStatusHistory, JobStatus, JobUrgency
@@ -39,16 +42,22 @@ async def create_job(
     and wait for batch delivery at 6 PM.
     """
     job_service = JobService(db)
-    job = await job_service.create_job(job_data)
+    try:
+        job = await job_service.create_job(job_data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Auto-assign to best cleaner and send notification
     if auto_assign:
-        from app.services.assignment_service import AssignmentService
-        assignment_service = AssignmentService(db)
-        assign_result = await assignment_service.assign_job_to_best_cleaner(job, send_offer=True)
-        if assign_result:
-            # Reload job with updated assignment
-            job = await job_service.get_job(job.id)
+        try:
+            from app.services.assignment_service import AssignmentService
+            assignment_service = AssignmentService(db)
+            assign_result = await assignment_service.assign_job_to_best_cleaner(job, send_offer=True)
+            if assign_result:
+                # Reload job with updated assignment
+                job = await job_service.get_job(job.id)
+        except Exception as e:
+            logger.warning(f"Auto-assign failed for job {job.id}: {e}. Job created without assignment.")
 
     # Reload job with relationships
     result = await db.execute(
