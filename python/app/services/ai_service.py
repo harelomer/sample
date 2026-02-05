@@ -64,14 +64,8 @@ class AIService:
 
         except Exception as e:
             logger.error(f"Error interpreting cleaner message: {e}")
-            # Return unclear interpretation on error
-            return AIInterpretation(
-                intent="unclear",
-                confidence=0,
-                needs_clarification=True,
-                clarification_question="Your message was unclear. Can you take the job? Please reply yes or no.",
-                suggested_response="Your message was unclear. Can you take the job? Please reply yes or no."
-            )
+            # Fallback: use keyword matching for common messages
+            return self._keyword_fallback(message, pending_jobs)
 
     async def interpret_guest_message(
         self,
@@ -475,6 +469,110 @@ Respond with valid JSON:
             needs_clarification=result.get("needs_clarification", False),
             clarification_question=result.get("clarification_question"),
             suggested_response=result.get("suggested_response", "")
+        )
+
+    def _keyword_fallback(
+        self,
+        message: str,
+        pending_jobs: List[Dict[str, Any]]
+    ) -> AIInterpretation:
+        """Rule-based fallback when AI API call fails. Handles common messages."""
+        import re
+        msg = message.lower().strip()
+        has_pending = len(pending_jobs) > 0
+        words = set(re.findall(r'[a-z\']+', msg))
+
+        def has_phrase(phrase):
+            return phrase in msg
+
+        def has_word(word):
+            return word in words
+
+        # Check rejection FIRST (before acceptance) — "no" / "cant" should reject
+        reject_phrases = ["cant come", "can't come", "schedule changed",
+                          "not available", "cant do", "can't do"]
+        reject_single = ["no", "cant", "can't", "cannot", "wont", "won't",
+                         "busy", "pass", "decline", "cancel"]
+        is_reject = any(has_phrase(p) for p in reject_phrases) or any(has_word(w) for w in reject_single)
+
+        # Check need_time BEFORE acceptance — "let me check" is not acceptance
+        time_phrases = ["let me check", "not sure", "dont know", "don't know",
+                        "let me think", "ill let you know", "i'll let you know",
+                        "give me a minute", "give me a sec"]
+        time_single = ["maybe", "thinking", "unsure"]
+        is_need_time = any(has_phrase(p) for p in time_phrases) or any(has_word(w) for w in time_single)
+
+        if is_need_time:
+            return AIInterpretation(
+                intent="need_time", confidence=70,
+                suggested_response="No problem, let us know when you decide."
+            )
+
+        if is_reject:
+            if has_pending:
+                return AIInterpretation(
+                    intent="reject_job", confidence=70,
+                    suggested_response="Understood. Job will be reassigned."
+                )
+            else:
+                return AIInterpretation(
+                    intent="reject_job", confidence=70,
+                    suggested_response="Understood, job cancelled. It will be reassigned."
+                )
+
+        # Acceptance keywords (only with pending jobs)
+        accept_phrases = ["i can do", "can do it", "i can", "i will", "ill do",
+                          "i'll do", "count me in"]
+        accept_single = ["yes", "yeah", "yep", "yea", "sure", "confirm",
+                         "confirmed", "accepted", "absolutely"]
+        is_accept = any(has_phrase(p) for p in accept_phrases) or any(has_word(w) for w in accept_single)
+        if has_pending and is_accept:
+            return AIInterpretation(
+                intent="accept_job", confidence=70,
+                suggested_response="Confirmed, you're booked. We'll send details before the job."
+            )
+
+        # "ok" / "okay" with pending jobs = acceptance
+        if has_pending and (has_word("ok") or has_word("okay")):
+            return AIInterpretation(
+                intent="accept_job", confidence=60,
+                suggested_response="Confirmed, you're booked. We'll send details before the job."
+            )
+
+        # Status update keywords
+        if any(has_phrase(p) for p in ["on my way", "im here", "i'm here"]) or has_word("omw"):
+            return AIInterpretation(
+                intent="status_update", confidence=70, status_update="en_route",
+                suggested_response="Noted, thank you."
+            )
+        if has_word("arrived") or (has_word("here") and len(words) <= 3):
+            return AIInterpretation(
+                intent="status_update", confidence=70, status_update="arrived",
+                suggested_response="Noted, thank you."
+            )
+        if any(has_word(w) for w in ["done", "finished", "completed"]):
+            return AIInterpretation(
+                intent="status_update", confidence=70, status_update="completed",
+                suggested_response="Noted, thank you."
+            )
+
+        # Acknowledgment keywords (no response needed)
+        ack_words = ["cool", "thanks", "great", "perfect", "alright"]
+        if any(has_word(w) for w in ack_words) or has_phrase("thank you") or has_phrase("sounds good") or has_phrase("got it"):
+            return AIInterpretation(
+                intent="acknowledgment", confidence=70,
+                suggested_response=""
+            )
+
+        # Default: unclear (but only if we truly can't determine)
+        if has_pending:
+            return AIInterpretation(
+                intent="unclear", confidence=0, needs_clarification=True,
+                suggested_response="Can you confirm — can you take the job? Reply yes or no."
+            )
+        return AIInterpretation(
+            intent="acknowledgment", confidence=30,
+            suggested_response=""
         )
 
     def _get_fallback_response(self, intent: str) -> str:
