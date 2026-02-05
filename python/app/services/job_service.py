@@ -83,7 +83,7 @@ class JobService:
         """Get a job by ID."""
         result = await self.db.execute(
             select(Job)
-            .options(selectinload(Job.property), selectinload(Job.assigned_cleaner))
+            .options(selectinload(Job.rental_property), selectinload(Job.assigned_cleaner))
             .where(Job.id == job_id)
         )
         return result.scalar_one_or_none()
@@ -106,7 +106,7 @@ class JobService:
             Tuple of (jobs list, total count)
         """
         query = select(Job).options(
-            selectinload(Job.property),
+            selectinload(Job.rental_property),
             selectinload(Job.assigned_cleaner)
         )
 
@@ -153,7 +153,7 @@ class JobService:
         """
         result = await self.db.execute(
             select(Job)
-            .options(selectinload(Job.property))
+            .options(selectinload(Job.rental_property))
             .where(
                 and_(
                     Job.status == JobStatus.PENDING.value,
@@ -169,7 +169,7 @@ class JobService:
         """Get urgent/same-day jobs that need immediate assignment."""
         result = await self.db.execute(
             select(Job)
-            .options(selectinload(Job.property))
+            .options(selectinload(Job.rental_property))
             .where(
                 and_(
                     Job.status == JobStatus.PENDING.value,
@@ -318,7 +318,7 @@ class JobService:
         """Get all pending job offers for a cleaner."""
         result = await self.db.execute(
             select(JobOffer)
-            .options(selectinload(JobOffer.job).selectinload(Job.property))
+            .options(selectinload(JobOffer.job).selectinload(Job.rental_property))
             .where(
                 and_(
                     JobOffer.cleaner_id == cleaner_id,

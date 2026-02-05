@@ -51,7 +51,7 @@ class Guest(Base, TimestampMixin):
     internal_notes = Column(Text)
 
     # Relationships
-    property = relationship("Property", back_populates="guests")
+    rental_property = relationship("Property", back_populates="guests")
     messages = relationship("Message", back_populates="guest", lazy="dynamic")
     coordination_events = relationship("CoordinationEvent", back_populates="guest", lazy="dynamic")
 

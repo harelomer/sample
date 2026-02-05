@@ -229,7 +229,7 @@ class MessagingService:
         if not message:
             if len(jobs) == 1:
                 job = jobs[0]
-                message = f"Confirmed! {job.property.short_name} on {job.scheduled_date.strftime('%A')} at {job.scheduled_time}."
+                message = f"Confirmed! {job.rental_property.short_name} on {job.scheduled_date.strftime('%A')} at {job.scheduled_time}."
             else:
                 job_list = ", ".join(
                     f"{j.property.short_name} {j.scheduled_date.strftime('%a')}"
@@ -258,7 +258,7 @@ class MessagingService:
         """
         if len(jobs) == 1:
             job = jobs[0]
-            message = f"Hi! Just checking - can you do {job.property.short_name} on {job.scheduled_date.strftime('%A')}? Let me know!"
+            message = f"Hi! Just checking - can you do {job.rental_property.short_name} on {job.scheduled_date.strftime('%A')}? Let me know!"
         else:
             message = f"Hi! I still need confirmation for {len(jobs)} jobs. Can you let me know?"
 

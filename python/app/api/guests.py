@@ -46,7 +46,7 @@ async def list_guests(
     db: AsyncSession = Depends(get_db)
 ):
     """List guests with optional filters."""
-    query = select(Guest).options(selectinload(Guest.property))
+    query = select(Guest).options(selectinload(Guest.rental_property))
 
     conditions = []
     if property_id:
@@ -84,7 +84,7 @@ async def list_guests(
                 "id": g.id,
                 "name": g.name,
                 "property_id": g.property_id,
-                "property_name": g.property.name if g.property else None,
+                "property_name": g.rental_property.name if g.rental_property else None,
                 "reservation_id": g.reservation_id,
                 "check_in_date": g.check_in_date.isoformat() if g.check_in_date else None,
                 "check_out_date": g.check_out_date.isoformat() if g.check_out_date else None,
@@ -110,7 +110,7 @@ async def get_guest(
     """Get a guest by ID."""
     result = await db.execute(
         select(Guest)
-        .options(selectinload(Guest.property))
+        .options(selectinload(Guest.rental_property))
         .where(Guest.id == guest_id)
     )
     guest = result.scalar_one_or_none()

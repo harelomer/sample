@@ -268,7 +268,7 @@ class SchedulerService:
         pending_result = await self.db.execute(
             select(JobOffer)
             .options(
-                selectinload(JobOffer.job).selectinload(Job.property),
+                selectinload(JobOffer.job).selectinload(Job.rental_property),
                 selectinload(JobOffer.cleaner)
             )
             .where(JobOffer.status == "pending")
@@ -337,7 +337,7 @@ class SchedulerService:
         # Get jobs that need re-assignment
         result = await self.db.execute(
             select(Job)
-            .options(selectinload(Job.property))
+            .options(selectinload(Job.rental_property))
             .where(Job.status == JobStatus.PENDING.value)
         )
         pending_jobs = result.scalars().all()

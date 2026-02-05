@@ -87,11 +87,11 @@ class CoordinationEvent(Base, TimestampMixin):
     ai_suggested_action = Column(Text)
     ai_confidence = Column(Integer)
 
-    # Metadata
-    metadata = Column(JSON, default=dict)
+    # Extra data
+    extra_data = Column(JSON, default=dict)
 
     # Relationships
-    property = relationship("Property")
+    rental_property = relationship("Property")
     guest = relationship("Guest", back_populates="coordination_events")
     job = relationship("Job")
     assigned_cleaner = relationship("Cleaner")

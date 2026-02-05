@@ -85,7 +85,7 @@ class Job(Base, TimestampMixin):
     batch_id = Column(String(50), index=True)  # Groups jobs sent together
 
     # Relationships
-    property = relationship("Property", back_populates="jobs")
+    rental_property = relationship("Property", back_populates="jobs")
     assigned_cleaner = relationship("Cleaner", foreign_keys=[assigned_cleaner_id])
     guest = relationship("Guest")
     offers = relationship("JobOffer", back_populates="job", lazy="dynamic")

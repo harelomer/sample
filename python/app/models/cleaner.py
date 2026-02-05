@@ -105,7 +105,7 @@ class CleanerPropertyFamiliarity(Base, TimestampMixin):
 
     # Relationships
     cleaner = relationship("Cleaner", back_populates="property_familiarities")
-    property = relationship("Property", back_populates="cleaner_familiarities")
+    rental_property = relationship("Property", back_populates="cleaner_familiarities")
 
     def __repr__(self):
         return f"<CleanerPropertyFamiliarity cleaner={self.cleaner_id} property={self.property_id}>"

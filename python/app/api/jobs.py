@@ -41,7 +41,13 @@ async def create_job(
         scheduler_service = SchedulerService(db)
         await scheduler_service.process_urgent_jobs()
 
-    await db.refresh(job)
+    # Reload job with relationships
+    result = await db.execute(
+        select(Job)
+        .options(selectinload(Job.rental_property), selectinload(Job.assigned_cleaner))
+        .where(Job.id == job.id)
+    )
+    job = result.scalar_one()
 
     return _format_job_response(job)
 
@@ -274,7 +280,7 @@ def _format_job_response(job: Job) -> JobResponse:
         batch_id=job.batch_id,
         is_same_day=job.is_same_day,
         is_overdue=job.is_overdue,
-        property_name=job.property.name if job.property else None,
+        property_name=job.rental_property.name if job.rental_property else None,
         created_at=job.created_at,
         updated_at=job.updated_at
     )

@@ -289,7 +289,7 @@ async def get_escalated_jobs(
             {
                 "id": job.id,
                 "property_id": job.property_id,
-                "property_name": job.property.name if job.property else None,
+                "property_name": job.rental_property.name if job.rental_property else None,
                 "scheduled_date": job.scheduled_date.isoformat() if job.scheduled_date else None,
                 "scheduled_time": job.scheduled_time,
                 "urgency": job.urgency,
@@ -320,7 +320,7 @@ async def get_pending_offers(
     result = await db.execute(
         select(JobOffer)
         .options(
-            selectinload(JobOffer.job),
+            selectinload(JobOffer.job).selectinload(Job.rental_property),
             selectinload(JobOffer.cleaner)
         )
         .where(JobOffer.status == "pending")
@@ -343,7 +343,7 @@ async def get_pending_offers(
                 "job_id": offer.job_id,
                 "cleaner_id": offer.cleaner_id,
                 "cleaner_name": offer.cleaner.name if offer.cleaner else None,
-                "property_name": offer.job.property.name if offer.job and offer.job.property else None,
+                "property_name": offer.job.rental_property.name if offer.job and offer.job.rental_property else None,
                 "scheduled_date": offer.job.scheduled_date.isoformat() if offer.job and offer.job.scheduled_date else None,
                 "offered_at": offer.offered_at.isoformat(),
                 "expires_at": offer.expires_at.isoformat() if offer.expires_at else None,

@@ -19,7 +19,7 @@ class CoordinationEventCreate(BaseModel):
     description: Optional[str] = None
     requested_time: Optional[datetime] = None
     original_time: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    extra_data: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CoordinationEventUpdate(BaseModel):
@@ -56,7 +56,7 @@ class CoordinationEventResponse(BaseModel):
     ai_categorized: bool
     ai_suggested_action: Optional[str]
     needs_immediate_action: bool
-    metadata: Dict[str, Any]
+    extra_data: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
 

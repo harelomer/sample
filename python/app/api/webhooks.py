@@ -255,7 +255,7 @@ async def _process_cleaner_message(
         pending_jobs.append({
             "offer_id": offer.id,
             "job_id": job.id,
-            "property_name": job.property.short_name if job.property else f"Property #{job.property_id}",
+            "property_name": job.rental_property.short_name if job.rental_property else f"Property #{job.property_id}",
             "date": job.scheduled_date.strftime("%A %b %d") if job.scheduled_date else "TBD",
             "time": job.scheduled_time or "TBD",
             "batch_position": offer.batch_position

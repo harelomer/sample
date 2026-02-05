@@ -58,7 +58,7 @@ class CoordinationService:
         # Get guest with property info
         result = await self.db.execute(
             select(Guest)
-            .options(selectinload(Guest.property))
+            .options(selectinload(Guest.rental_property))
             .where(Guest.id == guest_id)
         )
         guest = result.scalar_one_or_none()
@@ -68,11 +68,11 @@ class CoordinationService:
 
         # Use AI to categorize the message
         property_info = {
-            "name": guest.property.name,
-            "address": guest.property.address,
-            "wifi_name": guest.property.wifi_name,
-            "wifi_password": guest.property.wifi_password
-        } if guest.property else {}
+            "name": guest.rental_property.name,
+            "address": guest.rental_property.address,
+            "wifi_name": guest.rental_property.wifi_name,
+            "wifi_password": guest.rental_property.wifi_password
+        } if guest.rental_property else {}
 
         stay_info = {
             "check_in_date": guest.check_in_date.isoformat() if guest.check_in_date else None,
@@ -161,7 +161,7 @@ class CoordinationService:
             ai_categorized=True,
             ai_suggested_action=interpretation.get("suggested_action"),
             ai_confidence=80,  # Default confidence
-            metadata={
+            extra_data={
                 "extracted_items": interpretation.get("extracted_items", []),
                 "original_message": message
             }
@@ -279,7 +279,7 @@ class CoordinationService:
 
             if cleaner:
                 # Message cleaner
-                property_name = guest.property.short_name if guest.property else "the property"
+                property_name = guest.rental_property.short_name if guest.rental_property else "the property"
                 cleaner_message = (
                     f"Hi! Guest at {property_name} needs {items_str}. "
                     f"Can you drop it off?"
@@ -376,7 +376,7 @@ class CoordinationService:
 
         if job and job.assigned_cleaner:
             # Notify cleaner they can start early
-            property_name = guest.property.short_name if guest.property else "the property"
+            property_name = guest.rental_property.short_name if guest.rental_property else "the property"
             cleaner_message = (
                 f"Guest at {property_name} left early. "
                 f"You can start anytime now instead of waiting until {job.scheduled_time or 'later'}."

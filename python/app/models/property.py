@@ -47,13 +47,13 @@ class Property(Base, TimestampMixin):
     amenities = Column(JSON, default=dict)  # {"parking": "driveway", "washer": true}
 
     # Relationships
-    jobs = relationship("Job", back_populates="property", lazy="dynamic")
+    jobs = relationship("Job", back_populates="rental_property", lazy="dynamic")
     cleaner_familiarities = relationship(
         "CleanerPropertyFamiliarity",
-        back_populates="property",
+        back_populates="rental_property",
         lazy="dynamic"
     )
-    guests = relationship("Guest", back_populates="property", lazy="dynamic")
+    guests = relationship("Guest", back_populates="rental_property", lazy="dynamic")
 
     def __repr__(self):
         return f"<Property {self.name} ({self.city})>"
