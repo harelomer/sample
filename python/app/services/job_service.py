@@ -217,7 +217,8 @@ class JobService:
         elif new_status == JobStatus.COMPLETED:
             job.completed_at = datetime.now(timezone.utc)
             if job.started_at:
-                duration = (job.completed_at - job.started_at).total_seconds() / 60
+                started = job.started_at if job.started_at.tzinfo else job.started_at.replace(tzinfo=timezone.utc)
+                duration = (job.completed_at - started).total_seconds() / 60
                 job.actual_duration_minutes = int(duration)
 
         # Create history entry
