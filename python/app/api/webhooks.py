@@ -49,6 +49,15 @@ async def handle_whatsapp_webhook(
     if not message_text:
         return WebhookResponse(success=True, message="Ignored non-text message")
 
+    # Deduplicate: Green API retries webhooks if response is slow
+    if payload.idMessage:
+        existing = await db.execute(
+            select(Message.id).where(Message.external_message_id == payload.idMessage)
+        )
+        if existing.scalar_one_or_none():
+            logger.info(f"Duplicate webhook ignored: {payload.idMessage}")
+            return WebhookResponse(success=True, message="Duplicate webhook ignored")
+
     chat_id = payload.chat_id
     sender_phone = payload.sender_phone
     sender_name = payload.senderData.senderName

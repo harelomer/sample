@@ -381,6 +381,29 @@ async def get_pending_offers(
     }
 
 
+@router.post("/reset-database")
+async def reset_database(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reset the database by dropping and recreating all tables.
+
+    WARNING: This deletes ALL data. Use only for testing.
+    """
+    from app.models.base import Base, get_engine
+
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+
+    logger.info("Database reset - all tables dropped and recreated")
+    return {
+        "success": True,
+        "message": "Database has been reset. All data deleted."
+    }
+
+
 @router.post("/offers/{offer_id}/cancel")
 async def cancel_offer(
     offer_id: int,
