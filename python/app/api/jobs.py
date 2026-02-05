@@ -16,7 +16,6 @@ from app.schemas.job import (
     JobListResponse,
 )
 from app.services.job_service import JobService
-from app.services.scheduler_service import SchedulerService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -24,22 +23,27 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 @router.post("/", response_model=JobResponse)
 async def create_job(
     job_data: JobCreate,
-    auto_assign: bool = Query(False, description="Automatically assign to best cleaner"),
+    auto_assign: bool = Query(True, description="Automatically assign to best cleaner (default: True)"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Create a new cleaning job.
 
-    If auto_assign is True, the job will be immediately offered to the best
-    available cleaner. For urgent/same-day jobs, this happens automatically.
+    By default, the job will be immediately offered to the best available cleaner
+    and a WhatsApp notification will be sent. Set auto_assign=false to skip this
+    and wait for batch delivery at 6 PM.
     """
     job_service = JobService(db)
     job = await job_service.create_job(job_data)
 
-    # Handle urgent jobs or auto-assign
-    if job.urgency in [JobUrgency.URGENT.value, JobUrgency.SAME_DAY.value] or auto_assign:
-        scheduler_service = SchedulerService(db)
-        await scheduler_service.process_urgent_jobs()
+    # Auto-assign to best cleaner and send notification
+    if auto_assign:
+        from app.services.assignment_service import AssignmentService
+        assignment_service = AssignmentService(db)
+        assign_result = await assignment_service.assign_job_to_best_cleaner(job, send_offer=True)
+        if assign_result:
+            # Reload job with updated assignment
+            job = await job_service.get_job(job.id)
 
     # Reload job with relationships
     result = await db.execute(

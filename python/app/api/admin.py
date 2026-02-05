@@ -114,27 +114,49 @@ async def get_dashboard(
 @router.post("/jobs/{job_id}/assign")
 async def assign_job(
     job_id: int,
-    assignment: JobAssignment,
+    assignment: Optional[JobAssignment] = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Manually assign or reassign a job to a specific cleaner.
+    Assign a job to a cleaner.
 
-    Use this endpoint for manual override of automatic assignment.
+    If no cleaner_id is provided, automatically assigns to the best available cleaner.
+    If cleaner_id is provided, assigns to that specific cleaner.
     """
     assignment_service = AssignmentService(db)
+    job_service = JobService(db)
+
+    job = await job_service.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
 
     try:
-        result = await assignment_service.reassign_job(
-            job_id=job_id,
-            new_cleaner_id=assignment.cleaner_id,
-            cancel_current=True
-        )
-        return {
-            "success": True,
-            "message": f"Job {job_id} assigned to cleaner {assignment.cleaner_id}",
-            **result
-        }
+        if assignment and assignment.cleaner_id:
+            # Manual assignment to specific cleaner
+            result = await assignment_service.reassign_job(
+                job_id=job_id,
+                new_cleaner_id=assignment.cleaner_id,
+                cancel_current=True
+            )
+            return {
+                "success": True,
+                "message": f"Job {job_id} assigned to cleaner {assignment.cleaner_id}",
+                **result
+            }
+        else:
+            # Auto-assign to best available cleaner
+            result = await assignment_service.assign_job_to_best_cleaner(job, send_offer=True)
+            if result:
+                return {
+                    "success": True,
+                    "message": f"Job {job_id} assigned to {result['cleaner_name']}",
+                    **result
+                }
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No available cleaners for this job"
+                )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
