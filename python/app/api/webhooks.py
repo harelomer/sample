@@ -341,6 +341,7 @@ async def _process_cleaner_message(
                 }
             )
             await messaging_service.send_to_cleaner(cleaner, confirm_msg)
+            result["_outbound_message"] = confirm_msg
 
             # Update context to track we're waiting for multi-job confirmation
             if context:
@@ -367,6 +368,7 @@ async def _process_cleaner_message(
                 data={"jobs": pending_jobs}
             )
             await messaging_service.send_to_cleaner(cleaner, response)
+            result["_outbound_message"] = response
 
     elif interpretation.intent == "reject_job":
         if pending_offers:
@@ -381,6 +383,7 @@ async def _process_cleaner_message(
                 data={}
             )
             await messaging_service.send_to_cleaner(cleaner, response)
+            result["_outbound_message"] = response
         else:
             # No pending offers — check if cleaner is cancelling an accepted/active job
             active_job_result = await db.execute(
@@ -410,6 +413,7 @@ async def _process_cleaner_message(
                     data={"job_id": active_job.id}
                 )
                 await messaging_service.send_to_cleaner(cleaner, response)
+                result["_outbound_message"] = response
             else:
                 # No pending offers, no active jobs — just acknowledge
                 result["action_taken"] = "no_action"
@@ -437,6 +441,7 @@ async def _process_cleaner_message(
             data={"accepted": accepted_positions, "rejected": rejected_positions}
         )
         await messaging_service.send_to_cleaner(cleaner, response)
+        result["_outbound_message"] = response
 
     elif interpretation.intent == "status_update":
         # Update job status
@@ -479,6 +484,7 @@ async def _process_cleaner_message(
             data={"status": interpretation.status_update}
         )
         await messaging_service.send_to_cleaner(cleaner, response)
+        result["_outbound_message"] = response
 
     elif interpretation.intent == "question":
         # Answer the question
@@ -488,6 +494,7 @@ async def _process_cleaner_message(
             data={"question_type": interpretation.question_type}
         )
         await messaging_service.send_to_cleaner(cleaner, response)
+        result["_outbound_message"] = response
         result["details"]["question_type"] = interpretation.question_type
 
     elif interpretation.needs_clarification:
@@ -500,6 +507,7 @@ async def _process_cleaner_message(
             }
         )
         await messaging_service.send_to_cleaner(cleaner, clarification_msg)
+        result["_outbound_message"] = clarification_msg
 
     # Update conversation context
     if context:
@@ -509,6 +517,15 @@ async def _process_cleaner_message(
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "intent": interpretation.intent
         })
+        # Track outbound response so AI has full conversation next time
+        if result.get("_outbound_message"):
+            context.last_outbound_message = result["_outbound_message"]
+            context.last_outbound_at = datetime.now(timezone.utc)
+            context.add_message_to_history({
+                "direction": "outbound",
+                "content": result["_outbound_message"],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
 
     return result
 
