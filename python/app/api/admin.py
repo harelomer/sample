@@ -16,7 +16,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import get_db
-from app.models.job import Job, JobOffer, JobStatus
+from app.models.job import Job, JobOffer, JobStatus, JobStatusHistory
 from app.models.cleaner import Cleaner
 from app.models.coordination import CoordinationEvent
 from app.schemas.job import JobAssignment, BatchJobOffer
@@ -414,6 +414,29 @@ async def reset_database(
     return {
         "success": True,
         "message": "Database has been reset. All data deleted."
+    }
+
+
+@router.delete("/jobs/all")
+async def delete_all_jobs(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete ALL jobs and their related offers/history from the database.
+
+    WARNING: This permanently removes all job data.
+    """
+    # Delete related records first (foreign key constraints)
+    from sqlalchemy import delete as sql_delete
+    await db.execute(sql_delete(JobStatusHistory))
+    await db.execute(sql_delete(JobOffer))
+    await db.execute(sql_delete(Job))
+    await db.commit()
+
+    logger.info("All jobs, offers, and status history deleted")
+    return {
+        "success": True,
+        "message": "All jobs have been deleted"
     }
 
 

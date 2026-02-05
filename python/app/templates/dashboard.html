@@ -162,7 +162,10 @@
                 <div id="section-jobs" class="section" style="display:none;">
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h2>Jobs</h2>
-                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#jobModal"><i class="bi bi-plus"></i> Create Job</button>
+                        <div>
+                            <button class="btn btn-danger me-2" onclick="deleteAllJobs()"><i class="bi bi-trash"></i> Delete All</button>
+                            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#jobModal"><i class="bi bi-plus"></i> Create Job</button>
+                        </div>
                     </div>
                     <div class="table-container">
                         <table class="table">
@@ -693,6 +696,23 @@
                 }
             } catch (err) {
                 console.error('Error saving guest:', err);
+            }
+        }
+
+        async function deleteAllJobs() {
+            if (!confirm('Are you sure you want to DELETE ALL JOBS? This cannot be undone.')) return;
+            try {
+                const res = await apiFetch(API_BASE + '/admin/jobs/all', { method: 'DELETE' });
+                if (res.ok) {
+                    loadJobs();
+                    loadDashboard();
+                    alert('All jobs deleted successfully.');
+                } else {
+                    const err = await res.json();
+                    alert('Failed to delete jobs: ' + (err.detail || 'Unknown error'));
+                }
+            } catch (err) {
+                console.error('Error deleting jobs:', err);
             }
         }
 
