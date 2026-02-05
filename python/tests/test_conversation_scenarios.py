@@ -388,6 +388,79 @@ class TestCancelConfirmedJob:
 
 
 # --------------------------------------------------------------------------- #
+#  3b. Cancel misclassified as acknowledgment (safety override)                 #
+# --------------------------------------------------------------------------- #
+
+class TestCancelOverridesAcknowledgment:
+
+    @pytest.mark.asyncio
+    async def test_actually_i_cant_sorry(self, db, seed, mock_ai, mock_messaging):
+        """
+        AI says 'acknowledgment' for 'Actually I cant sorry' after booking.
+        Safety check should override to reject_job and cancel the active job.
+        """
+        cleaner = seed["cleaner_a"]
+        job, offer = await _make_confirmed_job(db)
+
+        # AI misclassifies as acknowledgment (the bug)
+        result = await process(
+            db, cleaner, "Actually I cant sorry", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="acknowledgment", confidence=60,
+                suggested_response="",
+            ),
+        )
+
+        # Safety override should reclassify to reject_job → cancel the job
+        assert result["action_taken"] == "job_cancelled"
+
+        await db.refresh(offer)
+        assert offer.status == "cancelled"
+
+        # A response MUST be sent (not silently swallowed)
+        mock_messaging.send_to_cleaner.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancel_keyword_with_no_active_job(self, db, seed, mock_ai, mock_messaging):
+        """
+        AI says 'acknowledgment' with cancel keyword but no active job → no_action.
+        """
+        cleaner = seed["cleaner_a"]
+        # No jobs at all
+
+        result = await process(
+            db, cleaner, "I cant come tomorrow", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="acknowledgment", confidence=50,
+                suggested_response="",
+            ),
+        )
+
+        # Override to reject_job, but no active job → no_action
+        assert result["action_taken"] == "no_action"
+        assert result["details"]["reason"] == "no_active_jobs"
+
+    @pytest.mark.asyncio
+    async def test_thanks_not_overridden(self, db, seed, mock_ai, mock_messaging):
+        """
+        'Thanks' has no cancel keywords → stays as acknowledgment (no override).
+        """
+        cleaner = seed["cleaner_a"]
+        await _make_confirmed_job(db)
+
+        result = await process(
+            db, cleaner, "Thanks", mock_ai, mock_messaging,
+            AIInterpretation(
+                intent="acknowledgment", confidence=90,
+                suggested_response="",
+            ),
+        )
+
+        assert result["action_taken"] == "acknowledgment"
+        mock_messaging.send_to_cleaner.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
 #  4. Acknowledgment (no response)                                              #
 # --------------------------------------------------------------------------- #
 

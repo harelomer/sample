@@ -311,6 +311,18 @@ async def _process_cleaner_message(
     result = {"action_taken": interpretation.intent, "details": {}}
     response = interpretation.suggested_response or ""
 
+    # Safety check: override acknowledgment if message contains cancel/reject keywords
+    # Prevents AI from silently swallowing cancellation messages like "Actually I cant sorry"
+    if interpretation.intent == "acknowledgment":
+        import re
+        _cancel_words = {"cant", "can't", "cannot", "cancel", "wont", "won't"}
+        _msg_words = set(re.findall(r"[a-z']+", message_text.lower()))
+        if _cancel_words & _msg_words:
+            logger.info(f"Overriding acknowledgment → reject_job (cancel keywords in: {message_text})")
+            interpretation.intent = "reject_job"
+            if not response:
+                response = "Understood, job cancelled. It will be reassigned."
+
     # If there are no pending offers, don't process accept/partial intents
     if not pending_offers and interpretation.intent in ("accept_job", "partial_accept"):
         logger.info(f"Ignoring '{interpretation.intent}' intent — no pending offers for cleaner {cleaner.id}")
