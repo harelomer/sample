@@ -528,7 +528,7 @@
                     <tr>
                         <td>${j.property_name || 'N/A'}</td>
                         <td>${j.job_type}</td>
-                        <td>${new Date(j.scheduled_date).toLocaleDateString()}</td>
+                        <td>${new Date(j.scheduled_date).toLocaleDateString('en-US', {timeZone: 'UTC'})}</td>
                         <td>${j.cleaner_name || '-'}</td>
                         <td><span class="badge bg-${statusColors[j.status] || 'secondary'}">${j.status}</span></td>
                         <td>
@@ -558,8 +558,8 @@
                     <tr>
                         <td>${g.name}</td>
                         <td>${g.property_name || 'N/A'}</td>
-                        <td>${new Date(g.check_in_date).toLocaleDateString()}</td>
-                        <td>${new Date(g.check_out_date).toLocaleDateString()}</td>
+                        <td>${new Date(g.check_in_date).toLocaleDateString('en-US', {timeZone: 'UTC'})}</td>
+                        <td>${new Date(g.check_out_date).toLocaleDateString('en-US', {timeZone: 'UTC'})}</td>
                         <td><span class="badge bg-info">${g.status}</span></td>
                     </tr>
                 `).join('');
@@ -578,7 +578,7 @@
                     <tr>
                         <td>${o.cleaner_name}</td>
                         <td>${o.property_name}</td>
-                        <td>${new Date(o.scheduled_date).toLocaleDateString()}</td>
+                        <td>${new Date(o.scheduled_date).toLocaleDateString('en-US', {timeZone: 'UTC'})}</td>
                         <td>${o.hours_pending.toFixed(1)}h</td>
                         <td>${o.reminder_count}</td>
                         <td>

@@ -431,14 +431,41 @@ async def _process_cleaner_message(
                 result["action_taken"] = "no_action"
                 result["details"]["reason"] = "no_pending_offers"
                 response = "There are no open job offers right now. We'll reach out when something is available."
-        else:
-            # Accept all pending offers — AI already understood the intent
-            for offer in pending_offers:
-                await job_service.accept_job_offer(offer.id, message_text)
-            result["details"]["accepted_offers"] = len(pending_offers)
+        elif len(pending_offers) == 1:
+            # Single offer — accept it
+            await job_service.accept_job_offer(pending_offers[0].id, message_text)
+            result["details"]["accepted_offers"] = 1
             if context:
                 context.conversation_state = "idle"
                 context.awaiting_response_for = None
+        else:
+            # Multiple pending — check if conversation shows partial intent
+            recent_inbound = [
+                m for m in (context_dict.get("recent_messages") or [])
+                if m.get("direction") == "inbound"
+            ][-4:]
+            has_partial_signal = any(
+                "only" in m.get("content", "").lower()
+                for m in recent_inbound
+            )
+            if has_partial_signal:
+                # Cleaner said "only X" recently — don't accept all, ask which
+                jobs_desc = ", ".join(
+                    f"{i + 1}) {j.get('property_name', 'Property')} on {j.get('date', 'TBD')}"
+                    for i, j in enumerate(pending_jobs)
+                )
+                response = f"Which jobs do you want? {jobs_desc}. Reply with the numbers, or 'all'."
+                result["action_taken"] = "needs_clarification"
+                result["details"]["reason"] = "partial_signal_detected"
+                result["details"]["pending_count"] = len(pending_offers)
+            else:
+                # No partial signals — accept all
+                for offer in pending_offers:
+                    await job_service.accept_job_offer(offer.id, message_text)
+                result["details"]["accepted_offers"] = len(pending_offers)
+                if context:
+                    context.conversation_state = "idle"
+                    context.awaiting_response_for = None
 
     elif intent == "reject_job":
         if pending_offers:

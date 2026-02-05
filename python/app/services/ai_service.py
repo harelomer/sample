@@ -345,6 +345,15 @@ IMPORTANT:
 - For reject_job: acknowledge the cancellation briefly
 - Do NOT mention job IDs or database details
 
+PARTIAL ACCEPT — when cleaner says "only" + a specific job from a batch:
+- "Only the 14", "Only feb 25", "Only the last one", "Just the first one" → partial_accept
+- Look at the numbered job list below to match what the cleaner refers to
+- Fill accepted_jobs with the POSITION NUMBERS (1, 2, 3...) of jobs they WANT
+- Fill rejected_jobs with the POSITION NUMBERS of jobs they DON'T want
+- Example: 2 jobs listed, cleaner says "only the last one" → accepted_jobs: [2], rejected_jobs: [1]
+- If cleaner says "yes" AFTER previously saying "only X" in the conversation, treat as CONFIRMING
+  the partial choice — classify as partial_accept, not accept_job
+
 Respond with valid JSON:
 {
     "intent": "accept_job|reject_job|partial_accept|need_time|question|status_update|acknowledgment|unclear",
@@ -491,6 +500,49 @@ Respond with valid JSON:
         def has_word(word):
             return word in words
 
+        # Partial accept — "only" patterns with multiple pending jobs
+        if has_word("only") and has_pending and len(pending_jobs) > 1:
+            positions = [j.get("batch_position", i + 1) for i, j in enumerate(pending_jobs)]
+            if has_phrase("last one") or has_phrase("the last"):
+                last_pos = max(positions)
+                return AIInterpretation(
+                    intent="partial_accept", confidence=70,
+                    accepted_job_ids=[last_pos],
+                    rejected_job_ids=[p for p in positions if p != last_pos],
+                    suggested_response="Confirmed for the last job. The other will be reassigned."
+                )
+            elif has_phrase("first one") or has_phrase("the first"):
+                first_pos = min(positions)
+                return AIInterpretation(
+                    intent="partial_accept", confidence=70,
+                    accepted_job_ids=[first_pos],
+                    rejected_job_ids=[p for p in positions if p != first_pos],
+                    suggested_response="Confirmed for the first job. The other will be reassigned."
+                )
+            else:
+                # "only feb 25" / "only the 14" — can't match reliably, ask with numbers
+                jobs_list = ", ".join(
+                    f"{i + 1}) {j.get('property_name', 'Job')} on {j.get('date', 'TBD')}"
+                    for i, j in enumerate(pending_jobs)
+                )
+                return AIInterpretation(
+                    intent="unclear", confidence=40, needs_clarification=True,
+                    suggested_response=f"Which job do you want? {jobs_list}. Reply with the number."
+                )
+
+        # Number-only reply — cleaner picking a job from a numbered list
+        if msg.strip().isdigit() and has_pending and len(pending_jobs) > 1:
+            num = int(msg.strip())
+            positions = [j.get("batch_position", i + 1) for i, j in enumerate(pending_jobs)]
+            if 1 <= num <= len(pending_jobs):
+                accepted_pos = positions[num - 1]
+                return AIInterpretation(
+                    intent="partial_accept", confidence=75,
+                    accepted_job_ids=[accepted_pos],
+                    rejected_job_ids=[p for p in positions if p != accepted_pos],
+                    suggested_response=f"Confirmed for job {num}. The other will be reassigned."
+                )
+
         # Check rejection FIRST (before acceptance) — "no" / "cant" should reject
         reject_phrases = ["cant come", "can't come", "schedule changed",
                           "not available", "cant do", "can't do"]
@@ -522,6 +574,13 @@ Respond with valid JSON:
                     intent="reject_job", confidence=70,
                     suggested_response="Understood, job cancelled. It will be reassigned."
                 )
+
+        # "all" with pending = accept all (response to "which jobs?")
+        if has_pending and msg.strip() == "all":
+            return AIInterpretation(
+                intent="accept_job", confidence=75,
+                suggested_response="Confirmed, you're booked for all jobs."
+            )
 
         # Acceptance keywords — always classify as accept_job, handler decides
         # what to do (accept pending, reclaim rejected, or "no offers")
