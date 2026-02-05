@@ -69,8 +69,8 @@ class AIService:
                 intent="unclear",
                 confidence=0,
                 needs_clarification=True,
-                clarification_question="I'm not sure I understood. Could you please clarify?",
-                suggested_response="I'm not sure I understood. Could you please clarify?"
+                clarification_question="Your message was unclear. Can you take the job? Please reply yes or no.",
+                suggested_response="Your message was unclear. Can you take the job? Please reply yes or no."
             )
 
     async def interpret_guest_message(
@@ -137,11 +137,11 @@ class AIService:
         if not jobs:
             return ""
 
-        system_prompt = """You are a friendly property manager texting a cleaner on WhatsApp.
-Write like a real person - casual, warm, no corporate speak. Use natural language.
+        system_prompt = """You are a property management scheduling system messaging a cleaner on WhatsApp.
+Be direct, clear, and professional. No small talk, no filler.
 No emojis. No markdown. No bullet points or numbered lists.
-Keep it short - like a real text message between people who know each other.
-Always include the key details: property name, date, time, and pay."""
+Keep it short. Always include the key details: property name, date, time, and pay.
+Address the cleaner by name and ask clearly if they can take the job."""
 
         if len(jobs) == 1 and not is_batch:
             job = jobs[0]
@@ -180,13 +180,13 @@ Always include the key details: property name, date, time, and pay."""
             if len(jobs) == 1:
                 job = jobs[0]
                 return (
-                    f"Hey {cleaner_name}, are you free for {job['property_name']} on "
-                    f"{job['date']} at {job['time']}? Pays ${job['amount']}. Let me know!"
+                    f"{cleaner_name}, cleaning job available: {job['property_name']} on "
+                    f"{job['date']} at {job['time']}. Pay: ${job['amount']}. Can you take it?"
                 )
-            lines = [f"Hey {cleaner_name}, got {len(jobs)} jobs if you're interested:"]
+            lines = [f"{cleaner_name}, {len(jobs)} cleaning jobs available:"]
             for job in jobs:
                 lines.append(f"{job['property_name']} - {job['date']} {job['time']} ${job['amount']}")
-            lines.append("Let me know which ones work for you!")
+            lines.append("Which ones can you take?")
             return "\n".join(lines)
 
     async def generate_conversational_message(
@@ -204,34 +204,32 @@ Always include the key details: property name, date, time, and pay."""
         Returns:
             Natural-sounding message
         """
-        system_prompt = """You are a friendly property manager texting on WhatsApp.
-Write like a real person - casual, warm, brief. No corporate speak.
+        system_prompt = """You are a property management scheduling system messaging a cleaner directly on WhatsApp.
+Be direct, clear, and professional. No small talk, no filler, no greetings like "Hey! Hope you're doing well".
 No emojis. No markdown. No numbered lists.
-Sound like you're texting a coworker you're friendly with."""
+You are writing TO the cleaner. Never refer to them in third person."""
 
         prompts = {
             "multi_job_confirm": (
-                f"You sent {data.get('cleaner_name', 'the cleaner')} "
-                f"{data.get('job_count', 'multiple')} job offers and they said yes. "
-                f"But you're not sure if they mean all of them. The jobs are:\n"
-                f"{data.get('jobs_description', '')}\n"
-                f"Ask them casually to confirm which ones they want, "
-                f"or if they want all of them."
+                f"Ask {data.get('cleaner_name', 'the cleaner')} directly to confirm: "
+                f"they said yes to {data.get('job_count', 'multiple')} jobs. "
+                f"The jobs are:\n{data.get('jobs_description', '')}\n"
+                f"Ask them to confirm if they want all of them or which specific ones."
             ),
             "reminder": (
-                f"You texted {data.get('cleaner_name', 'the cleaner')} about a cleaning job "
-                f"at {data.get('property_name', 'a property')} on {data.get('date', 'soon')} "
-                f"but they haven't replied. Send a friendly nudge - not pushy."
+                f"Send {data.get('cleaner_name', 'the cleaner')} a reminder about "
+                f"the cleaning job at {data.get('property_name', 'a property')} "
+                f"on {data.get('date', 'soon')}. Ask if they can confirm."
             ),
             "reminder_batch": (
-                f"You texted {data.get('cleaner_name', 'the cleaner')} about "
-                f"{data.get('job_count', 'some')} jobs but they haven't replied. "
-                f"Send a friendly check-in."
+                f"Send {data.get('cleaner_name', 'the cleaner')} a reminder about "
+                f"{data.get('job_count', 'some')} jobs that need a response. "
+                f"Ask them to reply."
             ),
             "clarification": (
-                f"The cleaner said something unclear: \"{data.get('original_message', '')}\"\n"
-                f"You need to know if they can take the job. "
-                f"Ask them to clarify in a natural way."
+                f"{data.get('cleaner_name', 'Hi')}, your last message was unclear: "
+                f"\"{data.get('original_message', '')}\"\n"
+                f"Ask them directly: can you take the job? Yes or no."
             ),
         }
 
@@ -255,23 +253,23 @@ Sound like you're texting a coworker you're friendly with."""
         """Fallback messages when AI generation fails."""
         fallbacks = {
             "multi_job_confirm": (
-                f"Hey just making sure - did you mean you want all "
-                f"{data.get('job_count', 'the')} jobs? Or just some of them? "
-                f"Let me know which ones work for you"
+                f"Please confirm: do you want all "
+                f"{data.get('job_count', 'the')} jobs, or just some of them? "
+                f"Reply with which ones you can take."
             ),
             "reminder": (
-                f"Hey, just checking in about {data.get('property_name', 'the cleaning job')} "
-                f"on {data.get('date', 'the scheduled date')}. Can you do it?"
+                f"Reminder: {data.get('property_name', 'cleaning job')} "
+                f"on {data.get('date', 'the scheduled date')}. Can you confirm?"
             ),
             "reminder_batch": (
-                f"Hey, still need to hear back about those "
-                f"{data.get('job_count', '')} jobs. Let me know when you get a chance"
+                f"Still need your response on {data.get('job_count', 'the')} "
+                f"jobs sent earlier. Please reply."
             ),
             "clarification": (
-                "Hey not sure I caught that - are you good to take the job or not?"
+                "Your last message was unclear. Can you take the job? Please reply yes or no."
             ),
         }
-        return fallbacks.get(message_type, "Hey, just checking in. Let me know!")
+        return fallbacks.get(message_type, "Please reply to confirm.")
 
     async def generate_response(
         self,
@@ -290,10 +288,10 @@ Sound like you're texting a coworker you're friendly with."""
         Returns:
             Generated response message
         """
-        system_prompt = """You are a friendly property manager texting on WhatsApp.
-Write like a real person - casual, warm, brief. No corporate speak.
-No emojis. No markdown. Keep it short like a real text.
-Sound like you're texting someone you work with regularly."""
+        system_prompt = """You are a property management scheduling system messaging a cleaner directly on WhatsApp.
+Be direct, clear, and professional. No small talk, no filler.
+No emojis. No markdown. Keep it short.
+You are writing TO the cleaner. Never refer to them in third person."""
 
         prompts = {
             "accept_job": "Generate a confirmation message for accepted cleaning job(s).",
@@ -464,11 +462,11 @@ Respond with valid JSON:
     def _get_fallback_response(self, intent: str) -> str:
         """Get fallback response when AI generation fails."""
         fallbacks = {
-            "accept_job": "Great! You're confirmed.",
-            "reject_job": "No problem, thanks for letting me know.",
-            "partial_accept": "Got it! I'll update the assignments.",
-            "question": "Let me check and get back to you.",
-            "status_update": "Thanks for the update!",
-            "unclear": "I'm not sure I understood. Could you please clarify?"
+            "accept_job": "Confirmed. You're booked.",
+            "reject_job": "Understood. Job will be reassigned.",
+            "partial_accept": "Noted. Assignments updated.",
+            "question": "Checking on that. Will follow up shortly.",
+            "status_update": "Noted, thank you.",
+            "unclear": "Your message was unclear. Can you take the job? Please reply yes or no."
         }
-        return fallbacks.get(intent, "Thanks for your message!")
+        return fallbacks.get(intent, "Message received.")
