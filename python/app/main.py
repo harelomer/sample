@@ -81,10 +81,16 @@ async def lifespan(app: FastAPI):
     # Configure scheduled tasks
     logger.info("Configuring scheduled tasks...")
 
-    # Batch delivery at 6 PM daily
+    # Batch delivery at 6 PM daily in configured timezone
+    import pytz
+    delivery_tz = pytz.timezone(settings.batch_delivery_timezone)
     scheduler.add_job(
         scheduled_batch_delivery,
-        CronTrigger(hour=settings.batch_delivery_hour, minute=settings.batch_delivery_minute),
+        CronTrigger(
+            hour=settings.batch_delivery_hour,
+            minute=settings.batch_delivery_minute,
+            timezone=delivery_tz,
+        ),
         id="batch_delivery",
         replace_existing=True
     )
@@ -113,6 +119,9 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down scheduler...")
     scheduler.shutdown()
+
+    from app.dependencies import shutdown_services
+    await shutdown_services()
     logger.info("Application shutdown complete")
 
 
@@ -138,10 +147,12 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+_settings = get_settings()
+_cors_origins = _settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

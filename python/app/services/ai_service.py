@@ -10,7 +10,7 @@ This service handles all AI-powered message interpretation, including:
 import json
 import logging
 from typing import Optional, Dict, Any, List
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from app.config import get_settings
 from app.schemas.message import AIInterpretation
@@ -24,7 +24,7 @@ class AIService:
     def __init__(self):
         """Initialize the AI service with OpenAI client."""
         self.settings = get_settings()
-        self.client = OpenAI(api_key=self.settings.openai_api_key)
+        self.client = AsyncOpenAI(api_key=self.settings.openai_api_key)
         self.model = self.settings.openai_model
         self.max_tokens = self.settings.openai_max_tokens
 
@@ -49,7 +49,7 @@ class AIService:
         user_prompt = self._format_cleaner_context(message, context, pending_jobs)
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 messages=[
@@ -96,7 +96,7 @@ class AIService:
         user_prompt = self._format_guest_context(message, context, property_info, stay_info)
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 messages=[
@@ -165,7 +165,7 @@ Always include the key details: property name, date, time, and pay."""
             )
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=256,
                 messages=[
@@ -238,7 +238,7 @@ Sound like you're texting a coworker you're friendly with."""
         user_prompt = prompts.get(message_type, f"Generate a message about: {data}")
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=256,
                 messages=[
@@ -311,7 +311,7 @@ Data: {json.dumps(data)}
 {prompts.get(intent, 'Generate an appropriate response.')}"""
 
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=256,
                 messages=[

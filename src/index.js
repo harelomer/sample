@@ -27,8 +27,12 @@ const api = axios.create(axiosConfig);
 // Message buffer for debouncing - collects rapid messages before responding
 const messageBuffer = new Map(); // chatId -> { messages: [], senderName: string, timer: timeout }
 const DEBOUNCE_DELAY = 1000; // Wait 1 second for additional messages
+const MAX_BUFFER_SIZE = 1000; // Max concurrent chat buffers to prevent unbounded memory growth
 
 // Build API URL
+// NOTE: Green API embeds the token in the URL path, which means it can appear in
+// HTTP access logs and proxy logs. This is a limitation of the Green API design.
+// Ensure access logs are not exposed publicly and consider log redaction.
 function buildUrl(method) {
     return `${API_HOST}/waInstance${ID_INSTANCE}/${method}/${API_TOKEN_INSTANCE}`;
 }
@@ -155,6 +159,15 @@ function bufferMessage(chatId, messageText, senderName) {
         // Add message to buffer
         bufferEntry.messages.push(messageText);
     } else {
+        // Evict oldest entry if buffer is at capacity
+        if (messageBuffer.size >= MAX_BUFFER_SIZE) {
+            const oldestKey = messageBuffer.keys().next().value;
+            const oldestEntry = messageBuffer.get(oldestKey);
+            if (oldestEntry && oldestEntry.timer) {
+                clearTimeout(oldestEntry.timer);
+            }
+            messageBuffer.delete(oldestKey);
+        }
         // Create new buffer entry
         bufferEntry = {
             messages: [messageText],

@@ -1,6 +1,6 @@
 """Job models for cleaning jobs and offers."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, Text, DateTime, Enum
 from sqlalchemy.orm import relationship
 import enum
@@ -99,7 +99,7 @@ class Job(Base, TimestampMixin):
         """Check if job is for today."""
         if not self.scheduled_date:
             return False
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         return self.scheduled_date.date() == today
 
     @property
@@ -107,7 +107,7 @@ class Job(Base, TimestampMixin):
         """Check if job is past its deadline."""
         if not self.deadline:
             return False
-        return datetime.utcnow() > self.deadline
+        return datetime.now(timezone.utc) > self.deadline
 
     def update_status(self, new_status: JobStatus, notes: str = None):
         """Update job status and create history entry."""
@@ -130,7 +130,7 @@ class JobOffer(Base, TimestampMixin):
     cleaner_id = Column(Integer, ForeignKey("cleaners.id"), nullable=False, index=True)
 
     # Offer details
-    offered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    offered_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     expires_at = Column(DateTime)  # When offer times out
     offered_amount = Column(Float)  # Payment offered
 
@@ -159,7 +159,7 @@ class JobOffer(Base, TimestampMixin):
         """Check if offer has expired."""
         if not self.expires_at:
             return False
-        return datetime.utcnow() > self.expires_at and self.status == "pending"
+        return datetime.now(timezone.utc) > self.expires_at and self.status == "pending"
 
 
 class JobStatusHistory(Base, TimestampMixin):
@@ -174,7 +174,7 @@ class JobStatusHistory(Base, TimestampMixin):
     # Status change
     from_status = Column(String(50))
     to_status = Column(String(50), nullable=False)
-    changed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    changed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Context
     changed_by = Column(String(50))  # "system", "cleaner", "manager"

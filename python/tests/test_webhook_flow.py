@@ -121,7 +121,7 @@ class TestAIInterpretation:
     @pytest.mark.asyncio
     async def test_interpret_yes(self, ai_service, mock_openai_response):
         """Test interpretation of 'yes' response."""
-        with patch.object(ai_service.client.chat.completions, 'create') as mock_create:
+        with patch.object(ai_service.client.chat.completions, 'create', new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_openai_response('''{
                 "intent": "accept_job",
                 "confidence": 95,
@@ -143,7 +143,7 @@ class TestAIInterpretation:
     @pytest.mark.asyncio
     async def test_interpret_maybe(self, ai_service, mock_openai_response):
         """Test interpretation of 'maybe' response - should ask for clarification."""
-        with patch.object(ai_service.client.chat.completions, 'create') as mock_create:
+        with patch.object(ai_service.client.chat.completions, 'create', new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_openai_response('''{
                 "intent": "unclear",
                 "confidence": 40,
@@ -166,7 +166,7 @@ class TestAIInterpretation:
     @pytest.mark.asyncio
     async def test_interpret_no(self, ai_service, mock_openai_response):
         """Test interpretation of rejection."""
-        with patch.object(ai_service.client.chat.completions, 'create') as mock_create:
+        with patch.object(ai_service.client.chat.completions, 'create', new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_openai_response('''{
                 "intent": "reject_job",
                 "confidence": 90,
@@ -187,7 +187,7 @@ class TestAIInterpretation:
     @pytest.mark.asyncio
     async def test_interpret_status_update(self, ai_service, mock_openai_response):
         """Test interpretation of status update."""
-        with patch.object(ai_service.client.chat.completions, 'create') as mock_create:
+        with patch.object(ai_service.client.chat.completions, 'create', new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_openai_response('''{
                 "intent": "status_update",
                 "confidence": 95,

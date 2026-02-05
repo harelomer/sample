@@ -1,6 +1,6 @@
 """Guest CRUD API endpoints."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, and_
@@ -11,8 +11,13 @@ from app.models.base import get_db
 from app.models.guest import Guest
 from app.models.coordination import CoordinationEvent
 from app.schemas.guest import GuestCreate, GuestUpdate, GuestResponse
+from app.security import require_admin_api_key
 
-router = APIRouter(prefix="/guests", tags=["guests"])
+router = APIRouter(
+    prefix="/guests",
+    tags=["guests"],
+    dependencies=[Depends(require_admin_api_key)],
+)
 
 
 @router.post("/", response_model=GuestResponse)
@@ -54,7 +59,7 @@ async def list_guests(
     if status:
         conditions.append(Guest.status == status)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if current_only:
         conditions.append(Guest.check_in_date <= now)
         conditions.append(Guest.check_out_date >= now)

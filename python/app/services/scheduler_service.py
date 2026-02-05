@@ -11,7 +11,7 @@ Handles:
 import logging
 import uuid
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,8 +24,6 @@ from app.models.message import ConversationContext
 from app.config import get_settings
 from app.services.job_service import JobService
 from app.services.assignment_service import AssignmentService
-from app.services.messaging_service import MessagingService
-from app.services.ai_service import AIService
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +31,13 @@ logger = logging.getLogger(__name__)
 class SchedulerService:
     """Service for scheduled batch operations and reminders."""
 
-    def __init__(
-        self,
-        db: AsyncSession,
-        messaging_service: Optional[MessagingService] = None,
-        ai_service: Optional[AIService] = None
-    ):
+    def __init__(self, db: AsyncSession):
         """Initialize with dependencies."""
+        from app.dependencies import get_ai_service, get_messaging_service
         self.db = db
         self.settings = get_settings()
-        self.messaging = messaging_service or MessagingService()
-        self.ai = ai_service or AIService()
+        self.messaging = get_messaging_service()
+        self.ai = get_ai_service()
         self.job_service = JobService(db)
 
     async def run_batch_delivery(self) -> Dict[str, Any]:
@@ -65,12 +59,10 @@ class SchedulerService:
             return {"jobs_processed": 0, "cleaners_contacted": 0}
 
         # Generate unique batch ID for this run
-        batch_id = f"batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        batch_id = f"batch_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
 
         # Group jobs by property city for assignment
-        assignment_service = AssignmentService(
-            self.db, self.messaging, self.ai
-        )
+        assignment_service = AssignmentService(self.db)
 
         # Get best cleaner for each job and group by cleaner
         cleaner_jobs: Dict[int, List[Job]] = defaultdict(list)
@@ -230,7 +222,7 @@ class SchedulerService:
         context.active_batch_id = batch_id
         context.batch_jobs = [j.id for j in jobs]
         context.last_outbound_message = message
-        context.last_outbound_at = datetime.utcnow()
+        context.last_outbound_at = datetime.now(timezone.utc)
         context.awaiting_response_for = "job_confirmation"
         context.conversation_state = "awaiting_job_response"
 
@@ -275,7 +267,7 @@ class SchedulerService:
         )
         pending_offers = pending_result.scalars().all()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for offer in pending_offers:
             results["offers_checked"] += 1

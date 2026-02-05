@@ -5,7 +5,7 @@ Handles incoming messages and processes them through the AI service.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select, and_
@@ -17,13 +17,17 @@ from app.models.guest import Guest
 from app.models.job import Job, JobOffer, JobStatus
 from app.models.message import Message, ConversationContext, MessageDirection, MessageChannel, SenderType
 from app.schemas.webhook import WhatsAppWebhook, AirbnbWebhook, WebhookResponse
-from app.services.ai_service import AIService
-from app.services.messaging_service import MessagingService
+from app.dependencies import get_ai_service, get_messaging_service
 from app.services.job_service import JobService
 from app.services.coordination_service import CoordinationService
+from app.security import validate_webhook_request, rate_limit, sanitize_message_for_ai
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/webhook", tags=["webhooks"])
+router = APIRouter(
+    prefix="/webhook",
+    tags=["webhooks"],
+    dependencies=[Depends(validate_webhook_request), Depends(rate_limit)],
+)
 
 
 @router.post("/whatsapp", response_model=WebhookResponse)
@@ -79,7 +83,7 @@ async def handle_whatsapp_webhook(
         external_sender_id=sender_phone,
         content=message_text,
         content_type="text",
-        sent_at=datetime.utcnow()
+        sent_at=datetime.now(timezone.utc)
     )
     db.add(message)
     await db.flush()
@@ -109,7 +113,7 @@ async def handle_whatsapp_webhook(
         }
 
     message.processed = True
-    message.processed_at = datetime.utcnow()
+    message.processed_at = datetime.now(timezone.utc)
 
     return WebhookResponse(
         success=True,
@@ -157,7 +161,7 @@ async def handle_airbnb_webhook(
         external_sender_id=user_id,
         content=message_text,
         content_type="text",
-        sent_at=payload.created_at or datetime.utcnow()
+        sent_at=payload.created_at or datetime.now(timezone.utc)
     )
     db.add(message)
     await db.flush()
@@ -178,7 +182,7 @@ async def handle_airbnb_webhook(
         }
 
     message.processed = True
-    message.processed_at = datetime.utcnow()
+    message.processed_at = datetime.now(timezone.utc)
 
     return WebhookResponse(
         success=True,
@@ -189,18 +193,27 @@ async def handle_airbnb_webhook(
     )
 
 
+def _normalize_phone(phone: str) -> str:
+    """Normalize phone number by stripping leading + and non-digit chars."""
+    return phone.lstrip("+").strip()
+
+
 async def _identify_sender(
     db: AsyncSession,
     phone: str,
     chat_id: str
 ) -> tuple[str, Optional[Cleaner], Optional[Guest]]:
     """Identify sender by phone number or chat ID."""
+    normalized = _normalize_phone(phone)
+
     # Try to find cleaner
-    # First try by chat ID, then by phone
+    # First try by chat ID, then by exact phone match (with and without +)
     cleaner_result = await db.execute(
         select(Cleaner).where(
             (Cleaner.whatsapp_chat_id == chat_id) |
-            (Cleaner.phone.contains(phone))
+            (Cleaner.phone == phone) |
+            (Cleaner.phone == f"+{normalized}") |
+            (Cleaner.phone == normalized)
         )
     )
     cleaner = cleaner_result.scalar_one_or_none()
@@ -215,7 +228,9 @@ async def _identify_sender(
     guest_result = await db.execute(
         select(Guest).where(
             (Guest.whatsapp_chat_id == chat_id) |
-            (Guest.phone.contains(phone))
+            (Guest.phone == phone) |
+            (Guest.phone == f"+{normalized}") |
+            (Guest.phone == normalized)
         )
     )
     guest = guest_result.scalar_one_or_none()
@@ -236,8 +251,8 @@ async def _process_cleaner_message(
     chat_id: str
 ) -> dict:
     """Process a message from a cleaner."""
-    ai_service = AIService()
-    messaging_service = MessagingService()
+    ai_service = get_ai_service()
+    messaging_service = get_messaging_service()
     job_service = JobService(db)
 
     # Get conversation context
@@ -270,9 +285,12 @@ async def _process_cleaner_message(
             "batch_position": offer.batch_position
         })
 
+    # Sanitize message before AI interpretation
+    sanitized_text = sanitize_message_for_ai(message_text)
+
     # Interpret the message
     interpretation = await ai_service.interpret_cleaner_message(
-        message=message_text,
+        message=sanitized_text,
         context=context_dict,
         pending_jobs=pending_jobs
     )
@@ -443,7 +461,7 @@ async def _process_cleaner_message(
         context.add_message_to_history({
             "direction": "inbound",
             "content": message_text,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "intent": interpretation.intent
         })
 
@@ -459,9 +477,12 @@ async def _process_guest_message(
     """Process a message from a guest."""
     coordination_service = CoordinationService(db)
 
+    # Sanitize message before AI interpretation
+    sanitized_text = sanitize_message_for_ai(message_text)
+
     result = await coordination_service.process_guest_message(
         guest_id=guest.id,
-        message=message_text
+        message=sanitized_text
     )
 
     # Update message with processing info

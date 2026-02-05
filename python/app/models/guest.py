@@ -1,6 +1,6 @@
 """Guest model for Airbnb guests."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime
 from sqlalchemy.orm import relationship
 
@@ -61,7 +61,7 @@ class Guest(Base, TimestampMixin):
     @property
     def is_currently_staying(self) -> bool:
         """Check if guest is currently at the property."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return (
             self.check_in_date <= now <= self.check_out_date
             and self.status == "checked_in"

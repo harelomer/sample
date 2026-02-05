@@ -13,8 +13,13 @@ from app.schemas.property import (
     PropertyResponse,
     PropertyListResponse,
 )
+from app.security import require_admin_api_key
 
-router = APIRouter(prefix="/properties", tags=["properties"])
+router = APIRouter(
+    prefix="/properties",
+    tags=["properties"],
+    dependencies=[Depends(require_admin_api_key)],
+)
 
 
 @router.post("/", response_model=PropertyResponse)

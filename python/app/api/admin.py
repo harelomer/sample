@@ -9,7 +9,7 @@ Provides endpoints for:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
@@ -24,9 +24,14 @@ from app.schemas.cleaner import CleanerRanking
 from app.services.assignment_service import AssignmentService
 from app.services.scheduler_service import SchedulerService
 from app.services.job_service import JobService
+from app.security import require_admin_api_key
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_api_key)],
+)
 
 
 @router.get("/dashboard")
@@ -60,7 +65,7 @@ async def get_dashboard(
     )
 
     # Today's jobs
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
     tomorrow = today + timedelta(days=1)
     jobs_today = await db.scalar(
         select(func.count(Job.id)).where(
@@ -107,7 +112,7 @@ async def get_dashboard(
         "offers": {
             "pending_response": pending_offers or 0
         },
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -357,7 +362,7 @@ async def get_pending_offers(
     )
     total = total_result.scalar() or 0
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return {
         "items": [
             {
@@ -388,9 +393,17 @@ async def reset_database(
     """
     Reset the database by dropping and recreating all tables.
 
-    WARNING: This deletes ALL data. Use only for testing.
+    WARNING: This deletes ALL data. Only available in debug mode.
     """
+    from app.config import get_settings
     from app.models.base import Base, get_engine
+
+    settings = get_settings()
+    if not settings.debug:
+        raise HTTPException(
+            status_code=403,
+            detail="Database reset is only available in debug mode."
+        )
 
     engine = get_engine()
     async with engine.begin() as conn:

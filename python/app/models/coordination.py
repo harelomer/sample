@@ -1,6 +1,6 @@
 """Coordination models for guest-cleaner coordination events."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime, Boolean, JSON
 from sqlalchemy.orm import relationship
 import enum
@@ -110,7 +110,7 @@ class CoordinationEvent(Base, TimestampMixin):
     def resolve(self, outcome: str, notes: str = None):
         """Mark event as resolved."""
         self.status = EventStatus.RESOLVED.value
-        self.resolved_at = datetime.utcnow()
+        self.resolved_at = datetime.now(timezone.utc)
         self.resolution_outcome = outcome
         if notes:
             self.resolution_notes = notes

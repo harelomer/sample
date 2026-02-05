@@ -10,7 +10,7 @@ Handles:
 
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,25 +20,18 @@ from app.models.job import Job, JobStatus
 from app.models.guest import Guest
 from app.models.cleaner import Cleaner
 from app.models.property import Property
-from app.services.messaging_service import MessagingService
-from app.services.ai_service import AIService
-
 logger = logging.getLogger(__name__)
 
 
 class CoordinationService:
     """Service for guest-cleaner coordination."""
 
-    def __init__(
-        self,
-        db: AsyncSession,
-        messaging_service: Optional[MessagingService] = None,
-        ai_service: Optional[AIService] = None
-    ):
+    def __init__(self, db: AsyncSession):
         """Initialize with dependencies."""
+        from app.dependencies import get_ai_service, get_messaging_service
         self.db = db
-        self.messaging = messaging_service or MessagingService()
-        self.ai = ai_service or AIService()
+        self.messaging = get_messaging_service()
+        self.ai = get_ai_service()
 
     async def process_guest_message(
         self,
@@ -142,7 +135,7 @@ class CoordinationService:
             .where(
                 and_(
                     Job.property_id == guest.property_id,
-                    Job.scheduled_date >= datetime.utcnow().date()
+                    Job.scheduled_date >= datetime.now(timezone.utc).date()
                 )
             )
             .order_by(Job.scheduled_date.asc())
@@ -367,7 +360,7 @@ class CoordinationService:
             .where(
                 and_(
                     Job.property_id == guest.property_id,
-                    Job.scheduled_date >= datetime.utcnow().date()
+                    Job.scheduled_date >= datetime.now(timezone.utc).date()
                 )
             )
             .order_by(Job.scheduled_date.asc())
@@ -391,7 +384,7 @@ class CoordinationService:
         actions.append("Responded to guest")
 
         event.status = EventStatus.RESOLVED.value
-        event.resolved_at = datetime.utcnow()
+        event.resolved_at = datetime.now(timezone.utc)
         event.resolution_outcome = "acknowledged"
 
         return {

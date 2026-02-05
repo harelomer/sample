@@ -23,6 +23,7 @@ const openaiApi = axios.create(axiosConfig);
 // Store conversation history per chat (in-memory, resets on restart)
 const conversationHistory = new Map();
 const MAX_HISTORY = 20; // Keep last 20 messages per chat
+const MAX_CONVERSATIONS = 500; // Max tracked conversations to prevent unbounded memory growth
 
 // Command prefix for bot commands
 const COMMAND_PREFIX = '!';
@@ -64,6 +65,11 @@ async function sendMessage(restAPI, chatId, message) {
 async function getAIResponse(chatId, userMessage, senderName) {
     // Get or create conversation history for this chat
     if (!conversationHistory.has(chatId)) {
+        // Evict oldest conversation if at capacity
+        if (conversationHistory.size >= MAX_CONVERSATIONS) {
+            const oldestKey = conversationHistory.keys().next().value;
+            conversationHistory.delete(oldestKey);
+        }
         conversationHistory.set(chatId, []);
     }
     const history = conversationHistory.get(chatId);

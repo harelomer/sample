@@ -112,8 +112,8 @@ class CleanerPropertyFamiliarity(Base, TimestampMixin):
 
     def update_after_cleaning(self):
         """Update familiarity after a completed cleaning."""
-        from datetime import datetime
+        from datetime import datetime, timezone
         self.times_cleaned += 1
-        self.last_cleaned_at = datetime.utcnow().isoformat()
+        self.last_cleaned_at = datetime.now(timezone.utc).isoformat()
         # Familiarity increases with each cleaning, max 1.0
         self.familiarity_score = min(1.0, 0.3 + (self.times_cleaned * 0.1))

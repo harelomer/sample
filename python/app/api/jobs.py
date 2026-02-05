@@ -16,8 +16,13 @@ from app.schemas.job import (
     JobListResponse,
 )
 from app.services.job_service import JobService
+from app.security import require_admin_api_key
 
-router = APIRouter(prefix="/jobs", tags=["jobs"])
+router = APIRouter(
+    prefix="/jobs",
+    tags=["jobs"],
+    dependencies=[Depends(require_admin_api_key)],
+)
 
 
 @router.post("/", response_model=JobResponse)

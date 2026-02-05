@@ -2,7 +2,7 @@
 
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import get_db
@@ -13,8 +13,13 @@ from app.schemas.cleaner import (
     CleanerResponse,
     CleanerListResponse,
 )
+from app.security import require_admin_api_key
 
-router = APIRouter(prefix="/cleaners", tags=["cleaners"])
+router = APIRouter(
+    prefix="/cleaners",
+    tags=["cleaners"],
+    dependencies=[Depends(require_admin_api_key)],
+)
 
 
 @router.post("/", response_model=CleanerResponse)
@@ -66,13 +71,11 @@ async def list_cleaners(
         conditions.append(Cleaner.preferred_cities.contains([city]))
 
     if conditions:
-        from sqlalchemy import and_
         query = query.where(and_(*conditions))
 
     # Get total count
     count_query = select(func.count(Cleaner.id))
     if conditions:
-        from sqlalchemy import and_
         count_query = count_query.where(and_(*conditions))
     total = await db.scalar(count_query) or 0
 
@@ -216,7 +219,6 @@ async def set_property_familiarity(
         raise HTTPException(status_code=404, detail="Cleaner not found")
 
     # Get or create familiarity record
-    from sqlalchemy import and_
     fam_result = await db.execute(
         select(CleanerPropertyFamiliarity).where(
             and_(

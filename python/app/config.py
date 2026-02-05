@@ -3,7 +3,7 @@ Application configuration and settings.
 """
 
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import List, Optional
 from functools import lru_cache
 
 
@@ -14,6 +14,14 @@ class Settings(BaseSettings):
     app_name: str = "Property Management AI System"
     app_version: str = "1.0.0"
     debug: bool = False
+
+    # Security
+    admin_api_key: str = ""  # Required for admin endpoints; set via ADMIN_API_KEY env var
+    webhook_secret: str = ""  # Shared secret for webhook validation; set via WEBHOOK_SECRET env var
+    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+
+    # Rate limiting
+    rate_limit_per_minute: int = 60
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./property_management.db"
@@ -36,6 +44,7 @@ class Settings(BaseSettings):
     # Scheduling
     batch_delivery_hour: int = 18  # 6 PM for batch job delivery
     batch_delivery_minute: int = 0
+    batch_delivery_timezone: str = "America/Los_Angeles"  # Property-local timezone
     default_response_timeout_hours: int = 24
     urgent_response_timeout_hours: int = 2
     reminder_interval_hours: int = 2

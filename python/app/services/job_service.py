@@ -6,8 +6,8 @@ Handles job creation, status updates, and job-related queries.
 
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
-from sqlalchemy import select, and_, or_
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,7 +52,7 @@ class JobService:
 
         # Determine urgency based on date
         urgency = job_data.urgency
-        if job_data.scheduled_date.date() == datetime.utcnow().date():
+        if job_data.scheduled_date.date() == datetime.now(timezone.utc).date():
             urgency = JobUrgency.SAME_DAY.value
 
         job = Job(
@@ -128,10 +128,10 @@ class JobService:
             query = query.where(and_(*conditions))
 
         # Get total count
-        count_result = await self.db.execute(
-            select(Job.id).where(and_(*conditions)) if conditions else select(Job.id)
-        )
-        total = len(count_result.all())
+        count_query = select(func.count(Job.id))
+        if conditions:
+            count_query = count_query.where(and_(*conditions))
+        total = await self.db.scalar(count_query) or 0
 
         # Get paginated results
         query = query.order_by(Job.scheduled_date.asc())
@@ -158,7 +158,7 @@ class JobService:
                 and_(
                     Job.status == JobStatus.PENDING.value,
                     Job.urgency == JobUrgency.NORMAL.value,
-                    Job.scheduled_date > datetime.utcnow()
+                    Job.scheduled_date > datetime.now(timezone.utc)
                 )
             )
             .order_by(Job.scheduled_date.asc())
@@ -213,9 +213,9 @@ class JobService:
 
         # Update timestamps based on status
         if new_status == JobStatus.IN_PROGRESS:
-            job.started_at = datetime.utcnow()
+            job.started_at = datetime.now(timezone.utc)
         elif new_status == JobStatus.COMPLETED:
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
             if job.started_at:
                 duration = (job.completed_at - job.started_at).total_seconds() / 60
                 job.actual_duration_minutes = int(duration)
@@ -289,8 +289,8 @@ class JobService:
         offer = JobOffer(
             job_id=job_id,
             cleaner_id=cleaner_id,
-            offered_at=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(hours=expires_hours),
+            offered_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_hours),
             offered_amount=job.payment_amount,
             batch_id=batch_id,
             batch_position=batch_position
@@ -355,7 +355,7 @@ class JobService:
             raise ValueError(f"Offer {offer_id} not found")
 
         offer.status = "accepted"
-        offer.responded_at = datetime.utcnow()
+        offer.responded_at = datetime.now(timezone.utc)
         offer.response_message = response_message
 
         # Update job
@@ -399,7 +399,7 @@ class JobService:
             raise ValueError(f"Offer {offer_id} not found")
 
         offer.status = "rejected"
-        offer.responded_at = datetime.utcnow()
+        offer.responded_at = datetime.now(timezone.utc)
         offer.response_message = response_message
 
         # Update cleaner stats
@@ -424,7 +424,7 @@ class JobService:
             .where(
                 and_(
                     JobOffer.status == "pending",
-                    JobOffer.expires_at < datetime.utcnow()
+                    JobOffer.expires_at < datetime.now(timezone.utc)
                 )
             )
         )

@@ -1,8 +1,8 @@
 """Message models for conversation tracking."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime, Boolean, JSON
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, attributes
 import enum
 
 from app.models.base import Base, TimestampMixin
@@ -75,7 +75,7 @@ class Message(Base, TimestampMixin):
     processing_notes = Column(Text)
 
     # Timestamps
-    sent_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     delivered_at = Column(DateTime)
     read_at = Column(DateTime)
 
@@ -130,9 +130,13 @@ class ConversationContext(Base, TimestampMixin):
         """Add message to recent history, maintaining max size."""
         if self.recent_messages is None:
             self.recent_messages = []
-        self.recent_messages.append(message_dict)
-        if len(self.recent_messages) > max_messages:
-            self.recent_messages = self.recent_messages[-max_messages:]
+        # Create a new list to ensure SQLAlchemy detects the mutation
+        updated = list(self.recent_messages)
+        updated.append(message_dict)
+        if len(updated) > max_messages:
+            updated = updated[-max_messages:]
+        self.recent_messages = updated
+        attributes.flag_modified(self, "recent_messages")
 
     def get_context_for_ai(self) -> str:
         """Format context for AI interpretation."""

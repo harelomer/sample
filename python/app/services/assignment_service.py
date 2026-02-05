@@ -10,7 +10,7 @@ Implements the cleaner ranking algorithm based on:
 
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,8 +21,6 @@ from app.models.property import Property
 from app.config import get_settings
 from app.schemas.cleaner import CleanerRanking
 from app.services.job_service import JobService
-from app.services.messaging_service import MessagingService
-from app.services.ai_service import AIService
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +28,13 @@ logger = logging.getLogger(__name__)
 class AssignmentService:
     """Service for cleaner ranking and job assignment."""
 
-    def __init__(
-        self,
-        db: AsyncSession,
-        messaging_service: Optional[MessagingService] = None,
-        ai_service: Optional[AIService] = None
-    ):
+    def __init__(self, db: AsyncSession):
         """Initialize with dependencies."""
+        from app.dependencies import get_ai_service, get_messaging_service
         self.db = db
         self.settings = get_settings()
-        self.messaging = messaging_service or MessagingService()
-        self.ai = ai_service or AIService()
+        self.messaging = get_messaging_service()
+        self.ai = get_ai_service()
         self.job_service = JobService(db)
 
     async def rank_cleaners_for_job(
@@ -408,7 +402,7 @@ class AssignmentService:
                 property_id=property_id,
                 times_cleaned=1,
                 familiarity_score=0.3,
-                last_cleaned_at=datetime.utcnow().isoformat()
+                last_cleaned_at=datetime.now(timezone.utc).isoformat()
             )
             self.db.add(familiarity)
 

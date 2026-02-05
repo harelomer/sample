@@ -6,7 +6,7 @@ Handles all outbound communication to cleaners and guests.
 
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
 
 from app.config import get_settings
@@ -232,7 +232,7 @@ class MessagingService:
                 message = f"Confirmed! {job.rental_property.short_name} on {job.scheduled_date.strftime('%A')} at {job.scheduled_time}."
             else:
                 job_list = ", ".join(
-                    f"{j.property.short_name} {j.scheduled_date.strftime('%a')}"
+                    f"{j.rental_property.short_name} {j.scheduled_date.strftime('%a')}"
                     for j in jobs
                 )
                 message = f"Confirmed! You're set for: {job_list}"

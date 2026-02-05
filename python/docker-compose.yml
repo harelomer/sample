@@ -12,9 +12,11 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./property_management.db
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GREEN_API_INSTANCE_ID=${GREEN_API_INSTANCE_ID}
       - GREEN_API_TOKEN=${GREEN_API_TOKEN}
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       - DEBUG=true
     volumes:
       - ./app:/app/app:ro
