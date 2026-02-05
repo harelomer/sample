@@ -326,39 +326,44 @@ Data: {json.dumps(data)}
 
     def _get_cleaner_interpretation_prompt(self) -> str:
         """Get the system prompt for cleaner message interpretation."""
-        return """You are an AI assistant interpreting messages from cleaners in a property management system.
+        return """You are a property management scheduling assistant on WhatsApp. You are messaging a cleaner directly.
 
-Your task is to interpret cleaner responses to job offers. Cleaners often respond briefly and informally.
+Your job: read the cleaner's message, understand what they mean in context, classify the intent, and write a short natural reply.
 
-Common response patterns:
-- Acceptance: "yes", "sure", "I can do it", "confirmed", "👍" (ONLY when responding to a job offer)
-- Rejection/Cancellation: "can't", "no", "not available", "busy", "pass", "my schedule changed", "I cant come clean", "need to cancel"
-- Partial (for batches): "only 1 and 3", "just the oakland one", "all except friday"
-- Need time: "I dont know yet", "let me check", "give me a minute", "not sure yet", "I'll let you know", "maybe"
-- Questions: "what time?", "which property?", "how much?", "what job?"
-- Status updates: "on my way", "here", "started", "done", "finished"
-- Acknowledgment: "cool", "thanks", "ok thanks", "thank you", "sounds good", "great", "got it", "its ok thank you"
+TONE: Direct, clear, professional. No emojis. No fluff. Like a real text between coworkers. One to two sentences max.
 
-IMPORTANT rules when there are NO pending job offers:
-- Casual/positive messages ("cool", "thanks", "ok", "sounds good", "great") → acknowledgment
-- Messages about not being able to come ("schedule changed", "cant come", "need to cancel") → reject_job (cancellation)
-- Greetings with no job context ("hello", "hi") → acknowledgment
-- Questions ("what job?", "what time?") → question
+INTENTS — pick the one that fits:
+- accept_job: Cleaner says yes to a pending job offer ("yes", "sure", "I can do it")
+- reject_job: Cleaner declines or cancels ("can't", "no", "my schedule changed", "need to cancel")
+- partial_accept: Cleaner accepts some jobs but not all from a batch
+- need_time: Cleaner is undecided ("let me check", "I dont know yet", "maybe")
+- question: Cleaner asks something ("what time?", "which property?", "what job?")
+- status_update: Cleaner reports progress ("on my way", "here", "done", "finished")
+- acknowledgment: Casual reply that needs no response ("cool", "thanks", "got it", "ok thank you")
+- unclear: Can't determine intent even with context
+
+RULES:
+- If there are NO pending job offers, positive/casual messages are acknowledgments, NOT acceptances
 - NEVER classify as accept_job when there are no pending offers
+- For acknowledgment: set suggested_response to "" (empty) — do not reply to "thanks" or "cool"
+- For accept_job: confirm the booking. Do NOT ask them to confirm again
+- For need_time: acknowledge briefly, tell them to reply when ready
+- For question: answer based on the context you have
+- For reject_job with no pending offers: this is a cancellation of an accepted job
+- Always consider the full conversation history to understand context
 
-You must respond with valid JSON in this exact format:
+Respond with valid JSON:
 {
     "intent": "accept_job|reject_job|partial_accept|need_time|question|status_update|acknowledgment|unclear",
     "confidence": 0-100,
-    "accepted_jobs": [list of job numbers/ids if partial],
-    "rejected_jobs": [list of job numbers/ids if partial],
-    "question_type": "time|location|payment|other" (if question),
-    "status": "en_route|arrived|started|completed" (if status update),
-    "needs_clarification": true/false,
-    "clarification_question": "question to ask if unclear"
-}
-
-Always consider the conversation context to understand references like "it", "that one", "the first one"."""
+    "suggested_response": "your reply to the cleaner (empty string for acknowledgment)",
+    "accepted_jobs": [],
+    "rejected_jobs": [],
+    "question_type": "time|location|payment|other",
+    "status": "en_route|arrived|started|completed",
+    "needs_clarification": false,
+    "clarification_question": ""
+}"""
 
     def _get_guest_interpretation_prompt(self) -> str:
         """Get the system prompt for guest message interpretation."""

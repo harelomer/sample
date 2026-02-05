@@ -307,37 +307,27 @@ async def _process_cleaner_message(
 
     # Take action based on intent
     result = {"action_taken": interpretation.intent, "details": {}}
+    response = interpretation.suggested_response or ""
 
     # If there are no pending offers, don't process accept/partial intents
-    # — casual messages after a completed booking should not trigger new actions
     if not pending_offers and interpretation.intent in ("accept_job", "partial_accept"):
         logger.info(f"Ignoring '{interpretation.intent}' intent — no pending offers for cleaner {cleaner.id}")
         result["action_taken"] = "no_action"
         result["details"]["reason"] = "no_pending_offers"
+        response = ""  # Don't send anything
 
     elif interpretation.intent == "acknowledgment":
-        # Casual follow-up like "cool", "thanks", "got it" — no response needed
         logger.info(f"Acknowledgment from cleaner {cleaner.id}: {message_text}")
         result["action_taken"] = "acknowledgment"
-
-    elif interpretation.intent == "need_time":
-        # Cleaner needs time to decide — acknowledge and wait
-        response = await ai_service.generate_response(
-            context=context_dict.get("last_outbound_message", ""),
-            intent="need_time",
-            data={}
-        )
-        await messaging_service.send_to_cleaner(cleaner, response)
-        result["_outbound_message"] = response
+        response = ""  # Don't reply to casual follow-ups
 
     elif interpretation.intent == "accept_job":
-        # Check if this is a confirmation of a multi-job prompt
         is_confirming_multi = (
             context and context.conversation_state == "awaiting_multi_job_confirmation"
         )
 
         if len(pending_offers) > 1 and not is_confirming_multi:
-            # Multiple pending offers - ask for confirmation using AI
+            # Multiple pending offers - ask which ones
             jobs_desc = ", ".join(
                 f"{j.get('property_name', 'Property')} on {j.get('date', 'TBD')} at {j.get('time', 'TBD')}"
                 for j in pending_jobs
@@ -350,10 +340,8 @@ async def _process_cleaner_message(
                     "jobs_description": jobs_desc,
                 }
             )
-            await messaging_service.send_to_cleaner(cleaner, confirm_msg)
-            result["_outbound_message"] = confirm_msg
+            response = confirm_msg
 
-            # Update context to track we're waiting for multi-job confirmation
             if context:
                 context.conversation_state = "awaiting_multi_job_confirmation"
                 context.awaiting_response_for = "multi_job_confirmation"
@@ -361,41 +349,22 @@ async def _process_cleaner_message(
             result["action_taken"] = "awaiting_multi_job_confirmation"
             result["details"]["pending_count"] = len(pending_offers)
         else:
-            # Single offer OR confirmed multi-job acceptance
+            # Accept all pending offers
             for offer in pending_offers:
                 await job_service.accept_job_offer(offer.id, message_text)
             result["details"]["accepted_offers"] = len(pending_offers)
 
-            # Reset conversation state
             if context:
                 context.conversation_state = "idle"
                 context.awaiting_response_for = None
 
-            # Send confirmation
-            response = await ai_service.generate_response(
-                context=context_dict.get("last_outbound_message", ""),
-                intent="accept_job",
-                data={"jobs": pending_jobs}
-            )
-            await messaging_service.send_to_cleaner(cleaner, response)
-            result["_outbound_message"] = response
-
     elif interpretation.intent == "reject_job":
         if pending_offers:
-            # Reject pending offers
             for offer in pending_offers:
                 await job_service.reject_job_offer(offer.id, message_text)
             result["details"]["rejected_offers"] = len(pending_offers)
-
-            response = await ai_service.generate_response(
-                context=context_dict.get("last_outbound_message", ""),
-                intent="reject_job",
-                data={}
-            )
-            await messaging_service.send_to_cleaner(cleaner, response)
-            result["_outbound_message"] = response
         else:
-            # No pending offers — check if cleaner is cancelling an accepted/active job
+            # No pending offers — cancellation of an accepted/active job
             active_job_result = await db.execute(
                 select(Job).where(
                     and_(
@@ -416,21 +385,12 @@ async def _process_cleaner_message(
                 )
                 result["action_taken"] = "job_cancelled"
                 result["details"]["job_id"] = active_job.id
-
-                response = await ai_service.generate_response(
-                    context=context_dict.get("last_outbound_message", ""),
-                    intent="cancel_job",
-                    data={}
-                )
-                await messaging_service.send_to_cleaner(cleaner, response)
-                result["_outbound_message"] = response
             else:
-                # No pending offers, no active jobs — just acknowledge
                 result["action_taken"] = "no_action"
                 result["details"]["reason"] = "no_active_jobs"
+                response = ""
 
     elif interpretation.intent == "partial_accept":
-        # Handle partial acceptance
         accepted_positions = interpretation.accepted_job_ids
         rejected_positions = interpretation.rejected_job_ids
 
@@ -444,17 +404,7 @@ async def _process_cleaner_message(
         result["details"]["accepted"] = accepted_positions
         result["details"]["rejected"] = rejected_positions
 
-        # Send response
-        response = await ai_service.generate_response(
-            context=context_dict.get("last_outbound_message", ""),
-            intent="partial_accept",
-            data={"accepted": accepted_positions, "rejected": rejected_positions}
-        )
-        await messaging_service.send_to_cleaner(cleaner, response)
-        result["_outbound_message"] = response
-
     elif interpretation.intent == "status_update":
-        # Update job status
         status_map = {
             "en_route": JobStatus.EN_ROUTE,
             "arrived": JobStatus.IN_PROGRESS,
@@ -465,7 +415,6 @@ async def _process_cleaner_message(
 
         new_status = status_map.get(interpretation.status_update)
         if new_status:
-            # Find active job for this cleaner
             active_job_result = await db.execute(
                 select(Job).where(
                     and_(
@@ -487,37 +436,17 @@ async def _process_cleaner_message(
                 result["details"]["job_id"] = active_job.id
                 result["details"]["new_status"] = new_status.value
 
-        # Acknowledge
-        response = await ai_service.generate_response(
-            context="",
-            intent="status_update",
-            data={"status": interpretation.status_update}
-        )
-        await messaging_service.send_to_cleaner(cleaner, response)
-        result["_outbound_message"] = response
-
     elif interpretation.intent == "question":
-        # Answer the question
-        response = await ai_service.generate_response(
-            context=str(pending_jobs),
-            intent="question",
-            data={"question_type": interpretation.question_type}
-        )
-        await messaging_service.send_to_cleaner(cleaner, response)
-        result["_outbound_message"] = response
         result["details"]["question_type"] = interpretation.question_type
 
     elif interpretation.needs_clarification:
-        # Ask for clarification using AI for natural tone
-        clarification_msg = await ai_service.generate_conversational_message(
-            "clarification",
-            {
-                "cleaner_name": cleaner.name.split()[0] if cleaner.name else "there",
-                "original_message": message_text,
-            }
-        )
-        await messaging_service.send_to_cleaner(cleaner, clarification_msg)
-        result["_outbound_message"] = clarification_msg
+        if not response:
+            response = interpretation.clarification_question or "Can you clarify? Are you able to take the job?"
+
+    # Send the AI's response (if any)
+    if response:
+        await messaging_service.send_to_cleaner(cleaner, response)
+        result["_outbound_message"] = response
 
     # Update conversation context
     if context:
