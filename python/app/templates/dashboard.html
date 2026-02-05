@@ -397,6 +397,40 @@
     <script>
         const API_BASE = '';
 
+        // API Key management
+        let apiKey = localStorage.getItem('admin_api_key') || '';
+
+        function getHeaders(includeJson = false) {
+            const headers = {};
+            if (apiKey) headers['X-API-Key'] = apiKey;
+            if (includeJson) headers['Content-Type'] = 'application/json';
+            return headers;
+        }
+
+        async function apiFetch(url, options = {}) {
+            options.headers = { ...getHeaders(options.body != null), ...options.headers };
+            const res = await fetch(url, options);
+            if (res.status === 401 || res.status === 503) {
+                promptForApiKey('API key is missing or invalid. Please enter your Admin API Key.');
+                throw new Error('Unauthorized');
+            }
+            return res;
+        }
+
+        function promptForApiKey(message) {
+            const key = prompt(message || 'Enter your Admin API Key:');
+            if (key) {
+                apiKey = key.trim();
+                localStorage.setItem('admin_api_key', apiKey);
+                loadDashboard();
+            }
+        }
+
+        // Prompt on first load if no key stored
+        if (!apiKey) {
+            promptForApiKey('Enter your Admin API Key to access the dashboard:');
+        }
+
         // Navigation
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
@@ -425,7 +459,7 @@
 
         async function loadDashboard() {
             try {
-                const res = await fetch(API_BASE + '/admin/dashboard');
+                const res = await apiFetch(API_BASE + '/admin/dashboard');
                 const data = await res.json();
 
                 document.getElementById('stat-pending').textContent = data.jobs.pending;
@@ -446,7 +480,7 @@
 
         async function loadProperties() {
             try {
-                const res = await fetch(API_BASE + '/properties/');
+                const res = await apiFetch(API_BASE + '/properties/');
                 const data = await res.json();
 
                 const tbody = document.getElementById('properties-table');
@@ -467,7 +501,7 @@
 
         async function loadCleaners() {
             try {
-                const res = await fetch(API_BASE + '/cleaners/');
+                const res = await apiFetch(API_BASE + '/cleaners/');
                 const data = await res.json();
 
                 const tbody = document.getElementById('cleaners-table');
@@ -490,11 +524,11 @@
 
         async function loadJobs() {
             try {
-                const res = await fetch(API_BASE + '/jobs/');
+                const res = await apiFetch(API_BASE + '/jobs/');
                 const data = await res.json();
 
                 // Also load properties for the job modal
-                const propRes = await fetch(API_BASE + '/properties/');
+                const propRes = await apiFetch(API_BASE + '/properties/');
                 const propData = await propRes.json();
                 document.getElementById('job-property-select').innerHTML = propData.items.map(p =>
                     `<option value="${p.id}">${p.name}</option>`
@@ -529,11 +563,11 @@
 
         async function loadGuests() {
             try {
-                const res = await fetch(API_BASE + '/guests/');
+                const res = await apiFetch(API_BASE + '/guests/');
                 const data = await res.json();
 
                 // Also load properties for the guest modal
-                const propRes = await fetch(API_BASE + '/properties/');
+                const propRes = await apiFetch(API_BASE + '/properties/');
                 const propData = await propRes.json();
                 document.getElementById('guest-property-select').innerHTML = propData.items.map(p =>
                     `<option value="${p.id}">${p.name}</option>`
@@ -556,7 +590,7 @@
 
         async function loadOffers() {
             try {
-                const res = await fetch(API_BASE + '/admin/pending-offers');
+                const res = await apiFetch(API_BASE + '/admin/pending-offers');
                 const data = await res.json();
 
                 const tbody = document.getElementById('offers-table');
@@ -586,9 +620,8 @@
             data.standard_cleaning_rate = parseFloat(data.standard_cleaning_rate);
 
             try {
-                const res = await fetch(API_BASE + '/properties/', {
+                const res = await apiFetch(API_BASE + '/properties/', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
                 if (res.ok) {
@@ -607,9 +640,8 @@
             const data = Object.fromEntries(formData.entries());
 
             try {
-                const res = await fetch(API_BASE + '/cleaners/', {
+                const res = await apiFetch(API_BASE + '/cleaners/', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
                 if (res.ok) {
@@ -629,9 +661,8 @@
             data.property_id = parseInt(data.property_id);
 
             try {
-                const res = await fetch(API_BASE + '/jobs/', {
+                const res = await apiFetch(API_BASE + '/jobs/', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
                 if (res.ok) {
@@ -651,9 +682,8 @@
             data.property_id = parseInt(data.property_id);
 
             try {
-                const res = await fetch(API_BASE + '/guests/', {
+                const res = await apiFetch(API_BASE + '/guests/', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
                 if (res.ok) {
@@ -668,7 +698,7 @@
 
         async function assignJob(jobId) {
             try {
-                const res = await fetch(API_BASE + `/admin/jobs/${jobId}/assign`, { method: 'POST' });
+                const res = await apiFetch(API_BASE + `/admin/jobs/${jobId}/assign`, { method: 'POST' });
                 if (res.ok) {
                     loadJobs();
                     alert('Job assigned successfully!');
@@ -684,7 +714,7 @@
         async function cancelOffer(offerId) {
             if (!confirm('Cancel this offer?')) return;
             try {
-                const res = await fetch(API_BASE + `/admin/offers/${offerId}/cancel`, { method: 'POST' });
+                const res = await apiFetch(API_BASE + `/admin/offers/${offerId}/cancel`, { method: 'POST' });
                 if (res.ok) {
                     loadOffers();
                 }
