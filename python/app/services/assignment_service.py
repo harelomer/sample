@@ -193,7 +193,7 @@ class AssignmentService:
             select(JobOffer.cleaner_id).where(
                 and_(
                     JobOffer.job_id == job.id,
-                    JobOffer.status.in_(["rejected", "expired"])
+                    JobOffer.status.in_(["rejected", "expired", "cancelled"])
                 )
             )
         )

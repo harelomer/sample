@@ -316,7 +316,7 @@ async def _process_cleaner_message(
         logger.info(f"Ignoring '{interpretation.intent}' intent — no pending offers for cleaner {cleaner.id}")
         result["action_taken"] = "no_action"
         result["details"]["reason"] = "no_pending_offers"
-        response = ""  # Don't send anything
+        response = "There are no open job offers right now. We'll reach out when something is available."
 
     elif interpretation.intent == "acknowledgment":
         logger.info(f"Acknowledgment from cleaner {cleaner.id}: {message_text}")
@@ -392,6 +392,20 @@ async def _process_cleaner_message(
             active_job = active_job_result.scalar_one_or_none()
 
             if active_job:
+                # Mark the original accepted offer as cancelled so this cleaner is excluded from reassignment
+                accepted_offer_result = await db.execute(
+                    select(JobOffer).where(
+                        and_(
+                            JobOffer.job_id == active_job.id,
+                            JobOffer.cleaner_id == cleaner.id,
+                            JobOffer.status == "accepted"
+                        )
+                    )
+                )
+                accepted_offer = accepted_offer_result.scalar_one_or_none()
+                if accepted_offer:
+                    accepted_offer.status = "cancelled"
+
                 await job_service.update_job_status(
                     active_job.id, JobStatus.CANCELLED, "cleaner", message_text, message.id
                 )
