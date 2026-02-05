@@ -4,6 +4,7 @@ Webhook handlers for WhatsApp and Airbnb messages.
 Handles incoming messages and processes them through the AI service.
 """
 
+import re
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -274,6 +275,87 @@ def _describe_jobs(jobs: list[Job]) -> str:
     return ", ".join(parts)
 
 
+def _match_jobs_from_message(
+    message_text: str,
+    pending_offers: list,
+    pending_jobs: list[dict],
+) -> dict:
+    """
+    Deterministic job matching from the cleaner's message text.
+
+    The AI classifies intent; this function determines WHICH jobs the
+    cleaner wants by analyzing the actual words they used — not position
+    numbers the cleaner never saw.
+
+    Strategies (tried in order):
+      1. Date matching:  "the 26" → Feb 26 job
+      2. Ordinal refs:   "the last one" → last job in list
+      3. Digit-only msg: "2" → 2nd job (reply to numbered list)
+      4. Property name:  "the villa" → matched by name (only if names differ)
+
+    Returns:
+        {"accepted": [offer, ...], "rejected": [offer, ...], "matched": bool}
+    """
+    msg = message_text.lower().strip()
+    n = len(pending_offers)
+
+    if n == 0:
+        return {"accepted": [], "rejected": [], "matched": False}
+
+    # Extract day-of-month from each job's formatted date string
+    offer_days = []
+    for job_info in pending_jobs:
+        date_str = job_info.get("date", "")
+        day_match = re.search(r'\b(\d{1,2})\b', date_str)
+        offer_days.append(int(day_match.group(1)) if day_match else None)
+
+    accepted_indices = set()
+
+    # --- Strategy 1: date matching ---
+    # Extract numbers from the message and match to job dates
+    msg_numbers = [int(x) for x in re.findall(r'\d+', msg)]
+    for num in msg_numbers:
+        for i, day in enumerate(offer_days):
+            if day is not None and day == num:
+                accepted_indices.add(i)
+
+    # --- Strategy 2: ordinal references ---
+    if not accepted_indices:
+        if "last one" in msg or "the last" in msg:
+            accepted_indices.add(n - 1)
+        elif "first one" in msg or "the first" in msg:
+            accepted_indices.add(0)
+
+    # --- Strategy 3: digit-only message (reply to numbered list) ---
+    if not accepted_indices and msg.isdigit():
+        idx = int(msg) - 1  # 1-based → 0-based
+        if 0 <= idx < n:
+            accepted_indices.add(idx)
+
+    # --- Strategy 4: property name matching (only if names differ) ---
+    if not accepted_indices:
+        prop_names = [j.get("property_name", "").lower() for j in pending_jobs]
+        if len(set(prop_names)) > 1:
+            for i, name in enumerate(prop_names):
+                if name and name in msg:
+                    accepted_indices.add(i)
+
+    if accepted_indices:
+        accepted = [pending_offers[i] for i in sorted(accepted_indices)]
+        rejected = [pending_offers[i] for i in range(n) if i not in accepted_indices]
+        return {"accepted": accepted, "rejected": rejected, "matched": True}
+
+    return {"accepted": [], "rejected": [], "matched": False}
+
+
+def _build_numbered_list(pending_jobs: list[dict]) -> str:
+    """Build a numbered list of jobs for clarification messages."""
+    return ", ".join(
+        f"{i + 1}) {j.get('property_name', 'Property')} on {j.get('date', 'TBD')}"
+        for i, j in enumerate(pending_jobs)
+    )
+
+
 async def _cancel_active_job(
     db: AsyncSession, job: Job, cleaner: Cleaner,
     job_service: JobService, assignment_service: AssignmentService,
@@ -449,15 +531,33 @@ async def _process_cleaner_message(
                 for m in recent_inbound
             )
             if has_partial_signal:
-                # Cleaner said "only X" recently — don't accept all, ask which
-                jobs_desc = ", ".join(
-                    f"{i + 1}) {j.get('property_name', 'Property')} on {j.get('date', 'TBD')}"
-                    for i, j in enumerate(pending_jobs)
+                # Cleaner said "only X" recently — try to match which jobs
+                only_msg = next(
+                    (m.get("content", "") for m in reversed(recent_inbound)
+                     if "only" in m.get("content", "").lower()),
+                    ""
                 )
-                response = f"Which jobs do you want? {jobs_desc}. Reply with the numbers, or 'all'."
-                result["action_taken"] = "needs_clarification"
-                result["details"]["reason"] = "partial_signal_detected"
-                result["details"]["pending_count"] = len(pending_offers)
+                match = _match_jobs_from_message(only_msg, pending_offers, pending_jobs)
+                if match["matched"]:
+                    for offer in match["accepted"]:
+                        await job_service.accept_job_offer(offer.id, message_text)
+                    for offer in match["rejected"]:
+                        await job_service.reject_job_offer(offer.id, message_text)
+                        try:
+                            await assignment_service.cascade_to_next_cleaner(offer.job)
+                        except Exception as e:
+                            logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
+                    result["action_taken"] = "partial_accept"
+                    result["details"]["accepted_count"] = len(match["accepted"])
+                    result["details"]["rejected_count"] = len(match["rejected"])
+                    if not response:
+                        response = "Noted. Assignments updated."
+                else:
+                    jobs_desc = _build_numbered_list(pending_jobs)
+                    response = f"Which jobs do you want? {jobs_desc}. Reply with the numbers, or 'all'."
+                    result["action_taken"] = "needs_clarification"
+                    result["details"]["reason"] = "partial_signal_detected"
+                    result["details"]["pending_count"] = len(pending_offers)
             else:
                 # No partial signals — accept all
                 for offer in pending_offers:
