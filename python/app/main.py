@@ -6,9 +6,10 @@ Main FastAPI application entry point.
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -176,10 +177,18 @@ app.include_router(jobs_router)
 app.include_router(guests_router)
 
 
-# Root endpoint
+# Root endpoint - serve dashboard
 @app.get("/")
 async def root():
-    """Root endpoint with API information."""
+    """Serve the dashboard UI."""
+    template_path = Path(__file__).parent / "templates" / "dashboard.html"
+    return FileResponse(template_path, media_type="text/html")
+
+
+# API info endpoint
+@app.get("/api")
+async def api_info():
+    """API information endpoint."""
     return {
         "name": "Property Management AI System",
         "version": "1.0.0",
