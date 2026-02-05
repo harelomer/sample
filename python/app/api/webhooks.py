@@ -282,18 +282,49 @@ async def _process_cleaner_message(
     result = {"action_taken": interpretation.intent, "details": {}}
 
     if interpretation.intent == "accept_job":
-        # Accept all pending offers
-        for offer in pending_offers:
-            await job_service.accept_job_offer(offer.id, message_text)
-        result["details"]["accepted_offers"] = len(pending_offers)
-
-        # Send confirmation
-        response = await ai_service.generate_response(
-            context=context_dict.get("last_outbound_message", ""),
-            intent="accept_job",
-            data={"jobs": pending_jobs}
+        # Check if this is a confirmation of a multi-job prompt
+        is_confirming_multi = (
+            context and context.conversation_state == "awaiting_multi_job_confirmation"
         )
-        await messaging_service.send_to_cleaner(cleaner, response)
+
+        if len(pending_offers) > 1 and not is_confirming_multi:
+            # Multiple pending offers - ask for confirmation first
+            jobs_list = "\n".join(
+                f"  {i+1}) {j.get('property_name', 'Property')} - {j.get('date', 'TBD')} at {j.get('time', 'TBD')}"
+                for i, j in enumerate(pending_jobs)
+            )
+            confirm_msg = (
+                f"Just to confirm - you want all {len(pending_offers)} jobs?\n"
+                f"{jobs_list}\n"
+                f"Reply 'yes all' to confirm, or tell me which ones."
+            )
+            await messaging_service.send_to_cleaner(cleaner, confirm_msg)
+
+            # Update context to track we're waiting for multi-job confirmation
+            if context:
+                context.conversation_state = "awaiting_multi_job_confirmation"
+                context.awaiting_response_for = "multi_job_confirmation"
+
+            result["action_taken"] = "awaiting_multi_job_confirmation"
+            result["details"]["pending_count"] = len(pending_offers)
+        else:
+            # Single offer OR confirmed multi-job acceptance
+            for offer in pending_offers:
+                await job_service.accept_job_offer(offer.id, message_text)
+            result["details"]["accepted_offers"] = len(pending_offers)
+
+            # Reset conversation state
+            if context:
+                context.conversation_state = "idle"
+                context.awaiting_response_for = None
+
+            # Send confirmation
+            response = await ai_service.generate_response(
+                context=context_dict.get("last_outbound_message", ""),
+                intent="accept_job",
+                data={"jobs": pending_jobs}
+            )
+            await messaging_service.send_to_cleaner(cleaner, response)
 
     elif interpretation.intent == "reject_job":
         # Reject all pending offers
