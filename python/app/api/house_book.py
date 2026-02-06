@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.base import get_db
 from app.models.house_book import HouseBookEntry, HouseBookEntryType
 from app.services.house_book_service import HouseBookService
-from app.dependencies import require_admin_api_key
+from app.security import require_admin_api_key
 
 
 router = APIRouter(prefix="/house-book", tags=["house-book"])
