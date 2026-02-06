@@ -35,42 +35,6 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
-async def run_startup_migrations():
-    """Run database migrations on startup to add missing columns."""
-    from sqlalchemy import text
-
-    async with get_db_session() as db:
-        # Migration: Add eve_reminder_sent column if missing
-        try:
-            # Check if column exists using PostgreSQL information_schema
-            result = await db.execute(text("""
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_name = 'jobs'
-                    AND column_name = 'eve_reminder_sent'
-                )
-            """))
-            column_exists = result.scalar()
-
-            if not column_exists:
-                # Column doesn't exist, add it
-                # Match the model definition: nullable=True, default=False
-                await db.execute(text(
-                    "ALTER TABLE jobs ADD COLUMN eve_reminder_sent BOOLEAN DEFAULT FALSE"
-                ))
-                await db.commit()
-                logger.info("Migration: Successfully added eve_reminder_sent column to jobs table")
-            else:
-                logger.info("Migration: eve_reminder_sent column already exists, skipping")
-
-        except Exception as e:
-            logger.error(f"CRITICAL: Migration failed for eve_reminder_sent: {e}")
-            # Roll back and re-raise to prevent app from starting with broken schema
-            await db.rollback()
-            raise RuntimeError(f"Database migration failed: {e}") from e
-
-
 async def scheduled_batch_delivery():
     """Run batch job delivery at scheduled time."""
     from app.services.scheduler_service import SchedulerService
@@ -124,11 +88,6 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized")
-
-    # Run migrations to add any missing columns
-    logger.info("Running database migrations...")
-    await run_startup_migrations()
-    logger.info("Migrations complete")
 
     # Configure scheduled tasks
     logger.info("Configuring scheduled tasks...")
