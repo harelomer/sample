@@ -71,6 +71,37 @@ async def run_startup_migrations():
             await db.rollback()
             raise RuntimeError(f"Database migration failed: {e}") from e
 
+        # Migration: Fix confirmed jobs without assigned cleaners
+        try:
+            # Find jobs with status confirmed/en_route/in_progress/completed but no assigned_cleaner_id
+            result = await db.execute(text("""
+                SELECT id, status FROM jobs
+                WHERE status IN ('confirmed', 'en_route', 'in_progress', 'completed')
+                AND assigned_cleaner_id IS NULL
+            """))
+            orphaned_jobs = result.fetchall()
+
+            if orphaned_jobs:
+                # Reset these jobs back to PENDING status
+                job_ids = [job[0] for job in orphaned_jobs]
+                await db.execute(text("""
+                    UPDATE jobs
+                    SET status = 'pending'
+                    WHERE id = ANY(:job_ids)
+                """), {"job_ids": job_ids})
+                await db.commit()
+                logger.warning(
+                    f"Migration: Fixed {len(orphaned_jobs)} orphaned confirmed jobs "
+                    f"(reset to pending): {job_ids}"
+                )
+            else:
+                logger.info("Migration: No orphaned confirmed jobs found")
+
+        except Exception as e:
+            logger.error(f"Migration failed for orphaned confirmed jobs: {e}")
+            await db.rollback()
+            # Don't raise - this is a data cleanup migration, not critical for startup
+
 
 async def scheduled_batch_delivery():
     """Run batch job delivery at scheduled time."""

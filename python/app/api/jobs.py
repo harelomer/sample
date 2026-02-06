@@ -136,6 +136,17 @@ async def update_job(
     # Handle status change specially
     if "status" in update_data:
         new_status = JobStatus(update_data.pop("status"))
+
+        # Validate: confirmed/en_route/in_progress/completed jobs must have assigned cleaner
+        if new_status in [JobStatus.CONFIRMED, JobStatus.EN_ROUTE, JobStatus.IN_PROGRESS, JobStatus.COMPLETED]:
+            # Check if cleaner will be assigned (either already set or in this update)
+            assigned_cleaner_id = update_data.get("assigned_cleaner_id", job.assigned_cleaner_id)
+            if not assigned_cleaner_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot set status to {new_status.value} without an assigned cleaner. Please set assigned_cleaner_id first."
+                )
+
         await job_service.update_job_status(job_id, new_status, "manager")
 
     # Update other fields

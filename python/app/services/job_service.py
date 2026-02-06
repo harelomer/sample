@@ -208,6 +208,14 @@ class JobService:
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
+        # Validate: confirmed/en_route/in_progress/completed jobs must have assigned cleaner
+        if new_status in [JobStatus.CONFIRMED, JobStatus.EN_ROUTE, JobStatus.IN_PROGRESS, JobStatus.COMPLETED]:
+            if not job.assigned_cleaner_id:
+                raise ValueError(
+                    f"Cannot set status to {new_status.value} without an assigned cleaner. "
+                    f"Job {job_id} has no assigned_cleaner_id."
+                )
+
         old_status = job.status
         job.status = new_status.value
 
