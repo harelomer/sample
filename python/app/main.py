@@ -22,6 +22,7 @@ from app.api import (
     cleaners_router,
     jobs_router,
     guests_router,
+    house_book_router,
 )
 
 # Configure logging
@@ -252,6 +253,7 @@ app.include_router(properties_router)
 app.include_router(cleaners_router)
 app.include_router(jobs_router)
 app.include_router(guests_router)
+app.include_router(house_book_router)
 
 
 # Root endpoint - serve dashboard

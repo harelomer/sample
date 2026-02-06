@@ -288,17 +288,22 @@ class MessagingService:
         self,
         cleaner: Any,
         jobs: list,
+        db: Any = None,
     ) -> Dict[str, Any]:
         """
         Send an evening-before reminder for confirmed jobs scheduled tomorrow.
+        Includes active house book entries for each property.
 
         Args:
             cleaner: Cleaner model instance
             jobs: Confirmed jobs scheduled for tomorrow
+            db: Database session (optional, for house book integration)
 
         Returns:
             Send result
         """
+        from app.services.house_book_service import HouseBookService
+
         cleaner_name = cleaner.name.split()[0] if cleaner.name else "Hi"
 
         if len(jobs) == 1:
@@ -307,18 +312,46 @@ class MessagingService:
             time_str = job.scheduled_time or "your scheduled time"
             message = (
                 f"Hi {cleaner_name}, just a reminder you have "
-                f"{prop_name} tomorrow at {time_str}. See you there!"
+                f"{prop_name} tomorrow at {time_str}."
             )
+
+            # Add house book entries if available
+            if db and job.property_id:
+                house_book_service = HouseBookService(db)
+                entries = await house_book_service.get_active_entries(job.property_id)
+                if entries:
+                    message += "\n\nNotes:"
+                    for entry in entries:
+                        if entry.title:
+                            message += f"\n• {entry.title}: {entry.content}"
+                        else:
+                            message += f"\n• {entry.content}"
+
+            message += "\n\nSee you there!"
         else:
             job_lines = []
             for job in jobs:
                 prop_name = job.rental_property.short_name if job.rental_property else "Property"
                 time_str = job.scheduled_time or "TBD"
-                job_lines.append(f"- {prop_name} at {time_str}")
+                job_line = f"- {prop_name} at {time_str}"
+
+                # Add house book entries if available
+                if db and job.property_id:
+                    house_book_service = HouseBookService(db)
+                    entries = await house_book_service.get_active_entries(job.property_id)
+                    if entries:
+                        for entry in entries:
+                            if entry.title:
+                                job_line += f"\n  Note: {entry.title}: {entry.content}"
+                            else:
+                                job_line += f"\n  Note: {entry.content}"
+
+                job_lines.append(job_line)
+
             jobs_text = "\n".join(job_lines)
             message = (
                 f"Hi {cleaner_name}, reminder for tomorrow:\n"
-                f"{jobs_text}\n"
+                f"{jobs_text}\n\n"
                 f"See you there!"
             )
 

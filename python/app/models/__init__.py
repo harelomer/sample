@@ -7,6 +7,7 @@ from app.models.guest import Guest
 from app.models.job import Job, JobOffer, JobStatusHistory
 from app.models.message import Message, ConversationContext
 from app.models.coordination import CoordinationEvent
+from app.models.house_book import HouseBookEntry, HouseBookEntryType
 
 __all__ = [
     "Base",
@@ -20,4 +21,6 @@ __all__ = [
     "Message",
     "ConversationContext",
     "CoordinationEvent",
+    "HouseBookEntry",
+    "HouseBookEntryType",
 ]

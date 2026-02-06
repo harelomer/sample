@@ -378,7 +378,7 @@ class SchedulerService:
                     continue
 
                 await self.messaging.send_eve_of_job_reminder(
-                    cleaner=cleaner, jobs=cjobs
+                    cleaner=cleaner, jobs=cjobs, db=self.db
                 )
 
                 # Mark all these jobs as reminded

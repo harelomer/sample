@@ -54,6 +54,7 @@ class Property(Base, TimestampMixin):
         lazy="dynamic"
     )
     guests = relationship("Guest", back_populates="rental_property", lazy="dynamic")
+    house_book_entries = relationship("HouseBookEntry", back_populates="rental_property", lazy="dynamic")
 
     def __repr__(self):
         return f"<Property {self.name} ({self.city})>"
