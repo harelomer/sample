@@ -526,6 +526,12 @@
             if (apiKey) headers['X-API-Key'] = apiKey;
             if (options.body) headers['Content-Type'] = 'application/json';
             options.headers = headers;
+
+            // Ensure URL uses current protocol (HTTPS) to avoid mixed content errors
+            if (url.startsWith('http://')) {
+                url = url.replace('http://', 'https://');
+            }
+
             return fetch(url, options);
         }
 
