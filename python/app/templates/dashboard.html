@@ -110,6 +110,33 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Scheduler Actions -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="table-container">
+                                <h5>Scheduler Actions (Testing)</h5>
+                                <p class="text-muted small">Manually trigger scheduled tasks for testing purposes.</p>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button class="btn btn-outline-primary" onclick="runBatchDelivery()">
+                                        <i class="bi bi-send"></i> Run Batch Delivery (6 PM)
+                                    </button>
+                                    <button class="btn btn-outline-info" onclick="runEveReminder()">
+                                        <i class="bi bi-bell"></i> Run Eve-of-Job Reminder (7 PM)
+                                    </button>
+                                    <button class="btn btn-outline-secondary" onclick="runOfferReminders()">
+                                        <i class="bi bi-alarm"></i> Run Offer Reminders
+                                    </button>
+                                    <button class="btn btn-outline-warning" onclick="runExpirationCheck()">
+                                        <i class="bi bi-clock-history"></i> Run Expiration Check
+                                    </button>
+                                </div>
+                                <div id="scheduler-result" class="mt-3" style="display:none;">
+                                    <pre class="bg-light p-2 rounded small"></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Properties Section -->
@@ -733,6 +760,63 @@
                 }
             } catch (err) {
                 console.error('Error canceling offer:', err);
+            }
+        }
+
+        // Scheduler action helpers
+        function showSchedulerResult(result) {
+            const container = document.getElementById('scheduler-result');
+            container.style.display = 'block';
+            container.querySelector('pre').textContent = JSON.stringify(result, null, 2);
+        }
+
+        async function runBatchDelivery() {
+            if (!confirm('Run batch delivery now? This will send job offers to cleaners.')) return;
+            try {
+                const res = await apiFetch(API_BASE + '/admin/batch/run', { method: 'POST' });
+                const data = await res.json();
+                showSchedulerResult(data);
+                loadDashboard();
+                loadOffers();
+            } catch (err) {
+                console.error('Error running batch delivery:', err);
+                alert('Failed to run batch delivery: ' + err.message);
+            }
+        }
+
+        async function runEveReminder() {
+            if (!confirm('Run eve-of-job reminder now? This will send reminders to cleaners with jobs tomorrow.')) return;
+            try {
+                const res = await apiFetch(API_BASE + '/admin/eve-reminders/run', { method: 'POST' });
+                const data = await res.json();
+                showSchedulerResult(data);
+            } catch (err) {
+                console.error('Error running eve reminder:', err);
+                alert('Failed to run eve reminder: ' + err.message);
+            }
+        }
+
+        async function runOfferReminders() {
+            try {
+                const res = await apiFetch(API_BASE + '/admin/reminders/run', { method: 'POST' });
+                const data = await res.json();
+                showSchedulerResult(data);
+            } catch (err) {
+                console.error('Error running offer reminders:', err);
+                alert('Failed to run offer reminders: ' + err.message);
+            }
+        }
+
+        async function runExpirationCheck() {
+            try {
+                const res = await apiFetch(API_BASE + '/admin/expirations/run', { method: 'POST' });
+                const data = await res.json();
+                showSchedulerResult(data);
+                loadDashboard();
+                loadOffers();
+            } catch (err) {
+                console.error('Error running expiration check:', err);
+                alert('Failed to run expiration check: ' + err.message);
             }
         }
 

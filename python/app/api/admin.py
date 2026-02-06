@@ -276,6 +276,26 @@ async def run_reminder_check(
     }
 
 
+@router.post("/eve-reminders/run")
+async def run_eve_of_job_reminder(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually trigger eve-of-job reminder.
+
+    Sends reminders to cleaners with confirmed jobs scheduled for tomorrow.
+    Normally runs automatically at 7 PM.
+    """
+    scheduler_service = SchedulerService(db)
+    result = await scheduler_service.run_eve_of_job_reminder()
+
+    return {
+        "success": True,
+        "message": "Eve-of-job reminder completed",
+        **result
+    }
+
+
 @router.post("/expirations/run")
 async def run_expiration_check(
     db: AsyncSession = Depends(get_db)
