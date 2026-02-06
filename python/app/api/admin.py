@@ -525,3 +525,60 @@ async def cancel_offer(
         "message": f"Offer {offer_id} cancelled",
         "job_id": offer.job_id
     }
+
+
+@router.post("/clear-all-data")
+async def clear_all_data(
+    confirm: str = Query(..., description="Type 'DELETE_ALL' to confirm"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    DANGER: Delete all data from the database for fresh testing.
+
+    This will delete:
+    - All properties
+    - All cleaners
+    - All jobs and job offers
+    - All guests
+    - All house book entries
+    - All messages and conversation context
+
+    Requires confirmation by passing confirm='DELETE_ALL'
+    """
+    if confirm != "DELETE_ALL":
+        raise HTTPException(
+            status_code=400,
+            detail="Must confirm with confirm='DELETE_ALL' to proceed"
+        )
+
+    from app.models.property import Property
+    from app.models.cleaner import Cleaner
+    from app.models.job import Job, JobOffer, JobStatusHistory
+    from app.models.guest import Guest
+    from app.models.house_book import HouseBookEntry
+    from app.models.message import Message, ConversationContext
+    from app.models.coordination import CoordinationEvent
+
+    try:
+        # Delete in order to avoid foreign key constraints
+        await db.execute(select(JobStatusHistory).delete())
+        await db.execute(select(JobOffer).delete())
+        await db.execute(select(Job).delete())
+        await db.execute(select(HouseBookEntry).delete())
+        await db.execute(select(Guest).delete())
+        await db.execute(select(CoordinationEvent).delete())
+        await db.execute(select(Message).delete())
+        await db.execute(select(ConversationContext).delete())
+        await db.execute(select(Cleaner).delete())
+        await db.execute(select(Property).delete())
+
+        await db.commit()
+
+        return {
+            "success": True,
+            "message": "All data cleared successfully. Database is now empty."
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error clearing data: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear data: {str(e)}")
