@@ -627,33 +627,76 @@ async def _process_cleaner_message(
                 result["details"]["reason"] = "no_active_jobs"
 
     elif intent == "partial_accept":
-        # Layer 1: deterministic matching from the cleaner's actual message
-        match = _match_jobs_from_message(message_text, pending_offers, pending_jobs)
+        # Check if we have pending offers or should look for reclaimable jobs
+        if not pending_offers:
+            # No pending offers — cleaner might be changing their mind about a rejected job
+            # Check if there's a reclaimable job that matches the message
+            reclaimable = await _find_reclaimable_job(db, cleaner.id)
+            if reclaimable:
+                old_offer, job = reclaimable
+                # Check if message mentions this job (by property name or date)
+                message_lower = message_text.lower()
+                property_name = job.rental_property.short_name if job.rental_property else ""
+                job_date_day = job.scheduled_date.day if job.scheduled_date else None
 
-        # Layer 2: AI's resolved day-of-month numbers (handles "next week", etc.)
-        if not match["matched"] and interpretation.accepted_job_ids:
-            match = _match_by_day_numbers(
-                interpretation.accepted_job_ids, pending_offers, pending_jobs
-            )
+                # Simple matching: check if property name or date is in message
+                matches_property = property_name and property_name.lower() in message_lower
+                matches_date = job_date_day and str(job_date_day) in message_text
 
-        if match["matched"]:
-            for offer in match["accepted"]:
-                await job_service.accept_job_offer(offer.id, message_text)
-            for offer in match["rejected"]:
-                await job_service.reject_job_offer(offer.id, message_text)
-                try:
-                    await assignment_service.cascade_to_next_cleaner(offer.job)
-                except Exception as e:
-                    logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
-            result["details"]["accepted_count"] = len(match["accepted"])
-            result["details"]["rejected_count"] = len(match["rejected"])
-            if not response:
-                response = "Noted. Assignments updated."
+                if matches_property or matches_date or "also" in message_lower or "both" in message_lower:
+                    # Message indicates they want this job
+                    old_offer.status = "accepted"
+                    old_offer.responded_at = datetime.now(timezone.utc)
+                    old_offer.response_message = message_text
+                    job.status = JobStatus.CONFIRMED.value
+                    job.assigned_cleaner_id = cleaner.id
+                    result["action_taken"] = "accept_job"
+                    result["details"]["accepted_offers"] = 1
+                    result["details"]["reclaimed"] = True
+                    result["details"]["job_id"] = job.id
+                    if context:
+                        context.conversation_state = "idle"
+                        context.awaiting_response_for = None
+                    if not response:
+                        response = f"Great! I've booked you for the {property_name or 'job'} on {job.scheduled_date.strftime('%A %b %d') if job.scheduled_date else 'TBD'}."
+                else:
+                    # Message doesn't clearly match — ask for confirmation
+                    result["action_taken"] = "no_action"
+                    result["details"]["reason"] = "unclear_reclaim_intent"
+            else:
+                # No pending or reclaimable jobs
+                result["action_taken"] = "no_action"
+                result["details"]["reason"] = "no_jobs_to_accept"
+                response = "There are no open job offers right now. We'll reach out when something is available."
         else:
-            # Neither matcher could resolve — ask for clarification
-            jobs_desc = _build_numbered_list(pending_jobs)
-            response = f"Which job do you want? {jobs_desc}. Reply with the number."
-            result["action_taken"] = "needs_clarification"
+            # Has pending offers — normal partial accept flow
+            # Layer 1: deterministic matching from the cleaner's actual message
+            match = _match_jobs_from_message(message_text, pending_offers, pending_jobs)
+
+            # Layer 2: AI's resolved day-of-month numbers (handles "next week", etc.)
+            if not match["matched"] and interpretation.accepted_job_ids:
+                match = _match_by_day_numbers(
+                    interpretation.accepted_job_ids, pending_offers, pending_jobs
+                )
+
+            if match["matched"]:
+                for offer in match["accepted"]:
+                    await job_service.accept_job_offer(offer.id, message_text)
+                for offer in match["rejected"]:
+                    await job_service.reject_job_offer(offer.id, message_text)
+                    try:
+                        await assignment_service.cascade_to_next_cleaner(offer.job)
+                    except Exception as e:
+                        logger.error(f"Auto-reassignment failed for job {offer.job_id}: {e}")
+                result["details"]["accepted_count"] = len(match["accepted"])
+                result["details"]["rejected_count"] = len(match["rejected"])
+                if not response:
+                    response = "Noted. Assignments updated."
+            else:
+                # Neither matcher could resolve — ask for clarification
+                jobs_desc = _build_numbered_list(pending_jobs)
+                response = f"Which job do you want? {jobs_desc}. Reply with the number."
+                result["action_taken"] = "needs_clarification"
 
     elif intent == "status_update":
         status_map = {
