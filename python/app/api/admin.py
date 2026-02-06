@@ -406,6 +406,39 @@ async def get_pending_offers(
     }
 
 
+@router.post("/migrate")
+async def run_migrations(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Run safe database migrations to add missing columns.
+
+    This adds new columns without deleting data.
+    """
+    from sqlalchemy import text
+
+    migrations_run = []
+
+    # Check and add eve_reminder_sent column to jobs table
+    try:
+        # Check if column exists (works for both SQLite and PostgreSQL)
+        await db.execute(text("SELECT eve_reminder_sent FROM jobs LIMIT 1"))
+    except Exception:
+        # Column doesn't exist, add it
+        try:
+            await db.execute(text("ALTER TABLE jobs ADD COLUMN eve_reminder_sent BOOLEAN DEFAULT FALSE"))
+            await db.commit()
+            migrations_run.append("Added eve_reminder_sent column to jobs table")
+        except Exception as e:
+            logger.warning(f"Could not add eve_reminder_sent column: {e}")
+
+    return {
+        "success": True,
+        "message": "Migrations complete",
+        "migrations_run": migrations_run if migrations_run else ["No migrations needed"]
+    }
+
+
 @router.post("/reset-database")
 async def reset_database(
     db: AsyncSession = Depends(get_db)

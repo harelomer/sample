@@ -130,6 +130,9 @@
                                     <button class="btn btn-outline-warning" onclick="runExpirationCheck()">
                                         <i class="bi bi-clock-history"></i> Run Expiration Check
                                     </button>
+                                    <button class="btn btn-outline-success" onclick="runMigrations()">
+                                        <i class="bi bi-database-gear"></i> Run Migrations
+                                    </button>
                                 </div>
                                 <div id="scheduler-result" class="mt-3" style="display:none;">
                                     <pre class="bg-light p-2 rounded small"></pre>
@@ -817,6 +820,18 @@
             } catch (err) {
                 console.error('Error running expiration check:', err);
                 alert('Failed to run expiration check: ' + err.message);
+            }
+        }
+
+        async function runMigrations() {
+            try {
+                const res = await apiFetch(API_BASE + '/admin/migrate', { method: 'POST' });
+                const data = await res.json();
+                showSchedulerResult(data);
+                alert('Migrations complete: ' + data.migrations_run.join(', '));
+            } catch (err) {
+                console.error('Error running migrations:', err);
+                alert('Failed to run migrations: ' + err.message);
             }
         }
 
