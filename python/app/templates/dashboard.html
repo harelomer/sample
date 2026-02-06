@@ -320,6 +320,21 @@
                             <label class="form-label">Cleaning Rate ($)</label>
                             <input type="number" class="form-control" name="standard_cleaning_rate" value="100">
                         </div>
+
+                        <hr class="my-4">
+                        <h6 class="mb-3">House Book (Optional)</h6>
+
+                        <div class="mb-3">
+                            <label class="form-label">House Rules (Static)</label>
+                            <textarea class="form-control" id="property-house-rules" rows="2" placeholder="e.g., No shoes inside, lock door when leaving"></textarea>
+                            <small class="text-muted">Permanent rules shown to cleaners</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Current Update (Live)</label>
+                            <textarea class="form-control" id="property-live-update" rows="2" placeholder="e.g., Toilet paper delivered, please stock"></textarea>
+                            <small class="text-muted">Temporary note (expires in 48 hours)</small>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -709,9 +724,45 @@
                     body: JSON.stringify(data)
                 });
                 if (res.ok) {
+                    const property = await res.json();
+
+                    // Add house book entries if provided
+                    const houseRules = document.getElementById('property-house-rules').value.trim();
+                    const liveUpdate = document.getElementById('property-live-update').value.trim();
+
+                    if (houseRules) {
+                        await apiFetch(API_BASE + '/house-book/entries', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                property_id: property.id,
+                                entry_type: 'static',
+                                title: 'House Rules',
+                                content: houseRules,
+                                priority: 10
+                            })
+                        });
+                    }
+
+                    if (liveUpdate) {
+                        await apiFetch(API_BASE + '/house-book/entries', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                property_id: property.id,
+                                entry_type: 'live',
+                                title: 'Update',
+                                content: liveUpdate,
+                                expires_hours: 48,
+                                priority: 5
+                            })
+                        });
+                    }
+
                     bootstrap.Modal.getInstance(document.getElementById('propertyModal')).hide();
                     form.reset();
+                    document.getElementById('property-house-rules').value = '';
+                    document.getElementById('property-live-update').value = '';
                     loadProperties();
+                    alert('Property saved' + (houseRules || liveUpdate ? ' with house book entries!' : '!'));
                 } else {
                     const err = await res.json();
                     alert('Failed to save property: ' + (err.detail || JSON.stringify(err)));
