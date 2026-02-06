@@ -969,6 +969,26 @@
                 const res = await apiFetch(API_BASE + '/admin/eve-reminders/run', { method: 'POST' });
                 const data = await res.json();
                 showSchedulerResult(data);
+
+                // Show user-friendly feedback
+                const cleanersCount = data.cleaners_notified || 0;
+                const remindersCount = data.reminders_sent || 0;
+                const failuresCount = (data.failures || []).length;
+
+                let message = `Eve-of-job reminder completed!\n\n`;
+                message += `✓ ${cleanersCount} cleaner(s) notified\n`;
+                message += `✓ ${remindersCount} job reminder(s) sent`;
+
+                if (failuresCount > 0) {
+                    message += `\n⚠ ${failuresCount} failure(s) (check console for details)`;
+                }
+
+                if (cleanersCount === 0 && remindersCount === 0) {
+                    message += `\n\nNo jobs scheduled for tomorrow that need reminders.`;
+                }
+
+                alert(message);
+                loadDashboard();
             } catch (err) {
                 console.error('Error running eve reminder:', err);
                 alert('Failed to run eve reminder: ' + err.message);
