@@ -35,6 +35,23 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
+async def run_startup_migrations():
+    """Run database migrations on startup to add missing columns."""
+    from sqlalchemy import text
+
+    async with get_db_session() as db:
+        # Migration: Add eve_reminder_sent column if missing
+        try:
+            await db.execute(text("SELECT eve_reminder_sent FROM jobs LIMIT 1"))
+        except Exception:
+            try:
+                await db.execute(text("ALTER TABLE jobs ADD COLUMN eve_reminder_sent BOOLEAN DEFAULT FALSE"))
+                await db.commit()
+                logger.info("Migration: Added eve_reminder_sent column to jobs table")
+            except Exception as e:
+                logger.warning(f"Migration failed for eve_reminder_sent: {e}")
+
+
 async def scheduled_batch_delivery():
     """Run batch job delivery at scheduled time."""
     from app.services.scheduler_service import SchedulerService
@@ -88,6 +105,11 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized")
+
+    # Run migrations to add any missing columns
+    logger.info("Running database migrations...")
+    await run_startup_migrations()
+    logger.info("Migrations complete")
 
     # Configure scheduled tasks
     logger.info("Configuring scheduled tasks...")
