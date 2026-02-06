@@ -657,8 +657,8 @@ async def _process_cleaner_message(
                     if context:
                         context.conversation_state = "idle"
                         context.awaiting_response_for = None
-                    if not response:
-                        response = f"Great! I've booked you for the {property_name or 'job'} on {job.scheduled_date.strftime('%A %b %d') if job.scheduled_date else 'TBD'}."
+                    # Always provide clear confirmation for reclaimed jobs
+                    response = f"Great! I've booked you for the {property_name or 'job'} on {job.scheduled_date.strftime('%A %b %d') if job.scheduled_date else 'TBD'}."
                 else:
                     # Message doesn't clearly match — ask for confirmation
                     result["action_taken"] = "no_action"
