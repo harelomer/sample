@@ -121,6 +121,18 @@ async def lifespan(app: FastAPI):
     """Application lifespan management."""
     settings = get_settings()
 
+    # Check if database should be reset (for testing)
+    import os
+    reset_db = os.getenv('RESET_DB_ON_STARTUP', 'false').lower() == 'true'
+
+    if reset_db:
+        logger.warning("🚨 RESET_DB_ON_STARTUP is enabled - DROPPING ALL TABLES!")
+        from app.models.base import Base, get_engine
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        logger.info("All tables dropped")
+
     # Initialize database
     logger.info("Initializing database...")
     await init_db()
