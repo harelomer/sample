@@ -965,10 +965,18 @@
             try {
                 // Load properties
                 const propRes = await apiFetch(API_BASE + '/properties');
+                if (!propRes.ok) {
+                    throw new Error(`Failed to load properties: HTTP ${propRes.status}`);
+                }
                 const properties = await propRes.json();
 
                 const tbody = document.getElementById('housebook-table');
                 tbody.innerHTML = '';
+
+                if (properties.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No properties yet. Go to Properties section and add one!</td></tr>';
+                    return;
+                }
 
                 for (const prop of properties) {
                     // Load entries for this property
