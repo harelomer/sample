@@ -159,6 +159,7 @@
                                     <th>Bedrooms</th>
                                     <th>Rate</th>
                                     <th>Status</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="properties-table"></tbody>
@@ -514,6 +515,45 @@
         </div>
     </div>
 
+    <!-- Property House Book Modal -->
+    <div class="modal fade" id="propertyHouseBookModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="propertyHouseBookModalTitle">House Book</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">Static Rules (House Rules)</h6>
+                            <button class="btn btn-sm btn-success" onclick="addHouseBookEntryFromProperty('static')">
+                                <i class="bi bi-plus"></i> Add Rule
+                            </button>
+                        </div>
+                        <div id="prop-hb-static-list" class="list-group mb-3">
+                            <!-- Static entries will be loaded here -->
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">Live Updates (Temporary)</h6>
+                            <button class="btn btn-sm btn-warning" onclick="addHouseBookEntryFromProperty('live')">
+                                <i class="bi bi-plus"></i> Add Update
+                            </button>
+                        </div>
+                        <div id="prop-hb-live-list" class="list-group">
+                            <!-- Live entries will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const API_BASE = '';
@@ -597,6 +637,11 @@
                         <td>${p.bedrooms}</td>
                         <td>$${p.standard_cleaning_rate}</td>
                         <td><span class="badge ${p.is_active ? 'bg-success' : 'bg-secondary'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editPropertyHouseBook(${p.id}, '${p.name}')">
+                                <i class="bi bi-book"></i> House Book
+                            </button>
+                        </td>
                     </tr>
                 `).join('');
             } catch (err) {
@@ -1123,7 +1168,19 @@
                 }
 
                 bootstrap.Modal.getInstance(document.getElementById('houseBookModal')).hide();
-                loadHouseBook();
+
+                // Refresh the house book section if it's visible
+                const houseBookSection = document.getElementById('section-housebook');
+                if (houseBookSection && houseBookSection.style.display !== 'none') {
+                    loadHouseBook();
+                }
+
+                // If opened from property house book modal, refresh and reopen it
+                if (currentPropertyHouseBook.id) {
+                    await loadPropertyHouseBookEntries(currentPropertyHouseBook.id, currentPropertyHouseBook.name);
+                    new bootstrap.Modal(document.getElementById('propertyHouseBookModal')).show();
+                }
+
                 alert('Entry saved successfully');
             } catch (err) {
                 console.error('Error saving entry:', err);
@@ -1149,6 +1206,118 @@
         function viewAllEntries(propertyId, propertyName) {
             // Could implement a modal to show all entries for a property
             alert(`Viewing all entries for ${propertyName} - Feature coming soon!`);
+        }
+
+        // Property House Book Management (from Properties table)
+        let currentPropertyHouseBook = { id: null, name: '' };
+
+        async function editPropertyHouseBook(propertyId, propertyName) {
+            currentPropertyHouseBook = { id: propertyId, name: propertyName };
+            document.getElementById('propertyHouseBookModalTitle').textContent = `House Book - ${propertyName}`;
+
+            await loadPropertyHouseBookEntries(propertyId, propertyName);
+
+            new bootstrap.Modal(document.getElementById('propertyHouseBookModal')).show();
+        }
+
+        async function loadPropertyHouseBookEntries(propertyId, propertyName) {
+            try {
+                const res = await apiFetch(API_BASE + `/house-book/properties/${propertyId}/entries`);
+                if (!res.ok) {
+                    throw new Error(`Failed to load entries: HTTP ${res.status}`);
+                }
+                const entries = await res.json();
+
+                const staticList = document.getElementById('prop-hb-static-list');
+                const liveList = document.getElementById('prop-hb-live-list');
+
+                const staticEntries = entries.filter(e => e.entry_type === 'static');
+                const liveEntries = entries.filter(e => e.entry_type === 'live');
+
+                // Populate static entries
+                if (staticEntries.length === 0) {
+                    staticList.innerHTML = '<div class="text-muted p-3">No static rules yet</div>';
+                } else {
+                    staticList.innerHTML = staticEntries.map(entry => `
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <strong>${entry.title || 'Rule'}:</strong> ${entry.content}
+                                    <br><small class="text-muted">Priority: ${entry.priority}</small>
+                                </div>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" onclick="editHouseBookEntry(${entry.id}, ${propertyId}, '${propertyName}')">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" onclick="deleteHouseBookEntryFromProperty(${entry.id})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+
+                // Populate live entries
+                if (liveEntries.length === 0) {
+                    liveList.innerHTML = '<div class="text-muted p-3">No live updates yet</div>';
+                } else {
+                    liveList.innerHTML = liveEntries.map(entry => `
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <strong>${entry.title || 'Update'}:</strong> ${entry.content}
+                                    ${entry.expires_at ? `<br><small class="text-muted">Expires: ${new Date(entry.expires_at).toLocaleString()}</small>` : ''}
+                                    <br><small class="text-muted">Priority: ${entry.priority}</small>
+                                </div>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-primary" onclick="editHouseBookEntry(${entry.id}, ${propertyId}, '${propertyName}')">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" onclick="deleteHouseBookEntryFromProperty(${entry.id})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Error loading property house book entries:', err);
+                alert('Failed to load house book entries: ' + err.message);
+            }
+        }
+
+        function addHouseBookEntryFromProperty(entryType) {
+            // Close the property house book modal temporarily
+            const propModal = bootstrap.Modal.getInstance(document.getElementById('propertyHouseBookModal'));
+            if (propModal) {
+                propModal.hide();
+            }
+
+            // Open the add/edit modal
+            addHouseBookEntry(currentPropertyHouseBook.id, currentPropertyHouseBook.name, entryType);
+        }
+
+        async function deleteHouseBookEntryFromProperty(entryId) {
+            if (!confirm('Delete this entry?')) return;
+
+            try {
+                const res = await apiFetch(API_BASE + `/house-book/entries/${entryId}`, {
+                    method: 'DELETE'
+                });
+
+                if (res.ok) {
+                    // Reload entries in the property modal
+                    await loadPropertyHouseBookEntries(currentPropertyHouseBook.id, currentPropertyHouseBook.name);
+                    alert('Entry deleted successfully');
+                } else {
+                    throw new Error('Failed to delete entry');
+                }
+            } catch (err) {
+                console.error('Error deleting entry:', err);
+                alert('Failed to delete entry: ' + err.message);
+            }
         }
 
         // Show/hide expires field when entry type changes
