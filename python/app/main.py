@@ -42,14 +42,33 @@ async def run_startup_migrations():
     async with get_db_session() as db:
         # Migration: Add eve_reminder_sent column if missing
         try:
-            await db.execute(text("SELECT eve_reminder_sent FROM jobs LIMIT 1"))
-        except Exception:
-            try:
-                await db.execute(text("ALTER TABLE jobs ADD COLUMN eve_reminder_sent BOOLEAN DEFAULT FALSE"))
+            # Check if column exists using PostgreSQL information_schema
+            result = await db.execute(text("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'jobs'
+                    AND column_name = 'eve_reminder_sent'
+                )
+            """))
+            column_exists = result.scalar()
+
+            if not column_exists:
+                # Column doesn't exist, add it
+                # Match the model definition: nullable=True, default=False
+                await db.execute(text(
+                    "ALTER TABLE jobs ADD COLUMN eve_reminder_sent BOOLEAN DEFAULT FALSE"
+                ))
                 await db.commit()
-                logger.info("Migration: Added eve_reminder_sent column to jobs table")
-            except Exception as e:
-                logger.warning(f"Migration failed for eve_reminder_sent: {e}")
+                logger.info("Migration: Successfully added eve_reminder_sent column to jobs table")
+            else:
+                logger.info("Migration: eve_reminder_sent column already exists, skipping")
+
+        except Exception as e:
+            logger.error(f"CRITICAL: Migration failed for eve_reminder_sent: {e}")
+            # Roll back and re-raise to prevent app from starting with broken schema
+            await db.rollback()
+            raise RuntimeError(f"Database migration failed: {e}") from e
 
 
 async def scheduled_batch_delivery():
