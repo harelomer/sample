@@ -1,0 +1,32 @@
+# Render Blueprint
+# AI-Powered Property Management Communication System
+
+services:
+  - type: web
+    name: property-management-api
+    env: docker
+    rootDir: python
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: property-management-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GREEN_API_INSTANCE_ID
+        sync: false
+      - key: GREEN_API_TOKEN
+        sync: false
+      - key: GREEN_API_HOST
+        sync: false
+      - key: DEBUG
+        value: false
+
+databases:
+  - name: property-management-db
+    databaseName: property_management
+    user: property_mgmt
+    plan: free

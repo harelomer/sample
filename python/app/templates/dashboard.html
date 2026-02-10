@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Management Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .stat-card { border-left: 4px solid; }
+        .stat-card.jobs { border-color: #0d6efd; }
+        .stat-card.cleaners { border-color: #198754; }
+        .stat-card.offers { border-color: #ffc107; }
+        .stat-card.escalated { border-color: #dc3545; }
+        .sidebar { min-height: 100vh; background: #212529; }
+        .sidebar a { color: #adb5bd; text-decoration: none; }
+        .sidebar a:hover, .sidebar a.active { color: #fff; background: #343a40; }
+        .nav-link { padding: 12px 20px; }
+        .nav-link i { margin-right: 10px; }
+        .content { padding: 20px; }
+        .table-container { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .badge-status { font-size: 0.8em; }
+        .refresh-btn { cursor: pointer; }
+        .refresh-btn:hover { color: #0d6efd; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-2 sidebar p-0">
+                <div class="p-3 text-white">
+                    <h5><i class="bi bi-house-door"></i> Property Manager</h5>
+                </div>
+                <nav class="nav flex-column">
+                    <a class="nav-link active" href="#" data-section="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
+                    <a class="nav-link" href="#" data-section="properties"><i class="bi bi-building"></i> Properties</a>
+                    <a class="nav-link" href="#" data-section="cleaners"><i class="bi bi-people"></i> Cleaners</a>
+                    <a class="nav-link" href="#" data-section="jobs"><i class="bi bi-clipboard-check"></i> Jobs</a>
+                    <a class="nav-link" href="#" data-section="guests"><i class="bi bi-person-badge"></i> Guests</a>
+                    <a class="nav-link" href="#" data-section="offers"><i class="bi bi-send"></i> Pending Offers</a>
+                </nav>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-10 content">
+                <!-- Dashboard Section -->
+                <div id="section-dashboard" class="section">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Dashboard</h2>
+                        <span class="refresh-btn" onclick="loadDashboard()"><i class="bi bi-arrow-clockwise"></i> Refresh</span>
+                    </div>
+
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="card stat-card jobs">
+                                <div class="card-body">
+                                    <h6 class="text-muted">Pending Jobs</h6>
+                                    <h2 id="stat-pending">-</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card stat-card cleaners">
+                                <div class="card-body">
+                                    <h6 class="text-muted">Active Cleaners</h6>
+                                    <h2 id="stat-cleaners">-</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card stat-card offers">
+                                <div class="card-body">
+                                    <h6 class="text-muted">Pending Offers</h6>
+                                    <h2 id="stat-offers">-</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card stat-card escalated">
+                                <div class="card-body">
+                                    <h6 class="text-muted">Escalated</h6>
+                                    <h2 id="stat-escalated">-</h2>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="table-container">
+                                <h5>Job Status Overview</h5>
+                                <table class="table table-sm">
+                                    <tbody>
+                                        <tr><td>Offered</td><td id="jobs-offered">-</td></tr>
+                                        <tr><td>Confirmed</td><td id="jobs-confirmed">-</td></tr>
+                                        <tr><td>In Progress</td><td id="jobs-in-progress">-</td></tr>
+                                        <tr><td>Today's Jobs</td><td id="jobs-today">-</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="table-container">
+                                <h5>Recent Activity</h5>
+                                <div id="recent-activity">
+                                    <p class="text-muted">Loading...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Properties Section -->
+                <div id="section-properties" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Properties</h2>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#propertyModal"><i class="bi bi-plus"></i> Add Property</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Address</th>
+                                    <th>City</th>
+                                    <th>Bedrooms</th>
+                                    <th>Rate</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="properties-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Cleaners Section -->
+                <div id="section-cleaners" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Cleaners</h2>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#cleanerModal"><i class="bi bi-plus"></i> Add Cleaner</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Phone</th>
+                                    <th>Channel</th>
+                                    <th>Jobs Done</th>
+                                    <th>Rating</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cleaners-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Jobs Section -->
+                <div id="section-jobs" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Jobs</h2>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#jobModal"><i class="bi bi-plus"></i> Create Job</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Property</th>
+                                    <th>Type</th>
+                                    <th>Date</th>
+                                    <th>Cleaner</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="jobs-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Guests Section -->
+                <div id="section-guests" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Guests</h2>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#guestModal"><i class="bi bi-plus"></i> Add Guest</button>
+                    </div>
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Property</th>
+                                    <th>Check-in</th>
+                                    <th>Check-out</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="guests-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Pending Offers Section -->
+                <div id="section-offers" class="section" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Pending Offers</h2>
+                        <span class="refresh-btn" onclick="loadOffers()"><i class="bi bi-arrow-clockwise"></i> Refresh</span>
+                    </div>
+                    <div class="table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Cleaner</th>
+                                    <th>Property</th>
+                                    <th>Date</th>
+                                    <th>Hours Pending</th>
+                                    <th>Reminders</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="offers-table"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Property Modal -->
+    <div class="modal fade" id="propertyModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Property</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="propertyForm">
+                        <div class="mb-3">
+                            <label class="form-label">Name</label>
+                            <input type="text" class="form-control" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Address</label>
+                            <input type="text" class="form-control" name="address" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">City</label>
+                            <input type="text" class="form-control" name="city" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Bedrooms</label>
+                                <input type="number" class="form-control" name="bedrooms" value="1">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Bathrooms</label>
+                                <input type="number" step="0.5" class="form-control" name="bathrooms" value="1">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Cleaning Rate ($)</label>
+                            <input type="number" class="form-control" name="standard_cleaning_rate" value="100">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveProperty()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cleaner Modal -->
+    <div class="modal fade" id="cleanerModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Cleaner</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="cleanerForm">
+                        <div class="mb-3">
+                            <label class="form-label">Name</label>
+                            <input type="text" class="form-control" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Phone (with country code)</label>
+                            <input type="text" class="form-control" name="phone" placeholder="+1234567890" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Preferred Channel</label>
+                            <select class="form-control" name="preferred_channel">
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="airbnb">Airbnb</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveCleaner()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Job Modal -->
+    <div class="modal fade" id="jobModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Job</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="jobForm">
+                        <div class="mb-3">
+                            <label class="form-label">Property</label>
+                            <select class="form-control" name="property_id" id="job-property-select" required></select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Job Type</label>
+                            <select class="form-control" name="job_type">
+                                <option value="turnover">Turnover</option>
+                                <option value="deep_clean">Deep Clean</option>
+                                <option value="touch_up">Touch Up</option>
+                                <option value="laundry">Laundry</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Scheduled Date & Time</label>
+                            <input type="datetime-local" class="form-control" name="scheduled_date" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Priority</label>
+                            <select class="form-control" name="priority">
+                                <option value="normal">Normal</option>
+                                <option value="urgent">Urgent</option>
+                                <option value="low">Low</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveJob()">Create Job</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Guest Modal -->
+    <div class="modal fade" id="guestModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Guest</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="guestForm">
+                        <div class="mb-3">
+                            <label class="form-label">Name</label>
+                            <input type="text" class="form-control" name="name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Property</label>
+                            <select class="form-control" name="property_id" id="guest-property-select" required></select>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Check-in Date</label>
+                                <input type="date" class="form-control" name="check_in_date" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Check-out Date</label>
+                                <input type="date" class="form-control" name="check_out_date" required>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveGuest()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_BASE = '';
+
+        // Navigation
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                link.classList.add('active');
+
+                const section = link.dataset.section;
+                document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
+                document.getElementById('section-' + section).style.display = 'block';
+
+                loadSection(section);
+            });
+        });
+
+        function loadSection(section) {
+            switch(section) {
+                case 'dashboard': loadDashboard(); break;
+                case 'properties': loadProperties(); break;
+                case 'cleaners': loadCleaners(); break;
+                case 'jobs': loadJobs(); break;
+                case 'guests': loadGuests(); break;
+                case 'offers': loadOffers(); break;
+            }
+        }
+
+        async function loadDashboard() {
+            try {
+                const res = await fetch(API_BASE + '/admin/dashboard');
+                const data = await res.json();
+
+                document.getElementById('stat-pending').textContent = data.jobs.pending;
+                document.getElementById('stat-cleaners').textContent = data.cleaners.active_available;
+                document.getElementById('stat-offers').textContent = data.offers.pending_response;
+                document.getElementById('stat-escalated').textContent = data.jobs.escalated;
+
+                document.getElementById('jobs-offered').textContent = data.jobs.offered;
+                document.getElementById('jobs-confirmed').textContent = data.jobs.confirmed;
+                document.getElementById('jobs-in-progress').textContent = data.jobs.in_progress;
+                document.getElementById('jobs-today').textContent = data.jobs.today;
+
+                document.getElementById('recent-activity').innerHTML = '<p class="text-muted">System ready. Last updated: ' + new Date().toLocaleTimeString() + '</p>';
+            } catch (err) {
+                console.error('Error loading dashboard:', err);
+            }
+        }
+
+        async function loadProperties() {
+            try {
+                const res = await fetch(API_BASE + '/properties/');
+                const data = await res.json();
+
+                const tbody = document.getElementById('properties-table');
+                tbody.innerHTML = data.items.map(p => `
+                    <tr>
+                        <td>${p.name}</td>
+                        <td>${p.address}</td>
+                        <td>${p.city}</td>
+                        <td>${p.bedrooms}</td>
+                        <td>$${p.standard_cleaning_rate}</td>
+                        <td><span class="badge ${p.is_active ? 'bg-success' : 'bg-secondary'}">${p.is_active ? 'Active' : 'Inactive'}</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error loading properties:', err);
+            }
+        }
+
+        async function loadCleaners() {
+            try {
+                const res = await fetch(API_BASE + '/cleaners/');
+                const data = await res.json();
+
+                const tbody = document.getElementById('cleaners-table');
+                tbody.innerHTML = data.items.map(c => `
+                    <tr>
+                        <td>${c.name}</td>
+                        <td>${c.phone}</td>
+                        <td>${c.preferred_channel}</td>
+                        <td>${c.total_jobs_completed}</td>
+                        <td>${c.average_rating.toFixed(1)}</td>
+                        <td>
+                            <span class="badge ${c.is_available ? 'bg-success' : 'bg-warning'}">${c.is_available ? 'Available' : 'Busy'}</span>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error loading cleaners:', err);
+            }
+        }
+
+        async function loadJobs() {
+            try {
+                const res = await fetch(API_BASE + '/jobs/');
+                const data = await res.json();
+
+                // Also load properties for the job modal
+                const propRes = await fetch(API_BASE + '/properties/');
+                const propData = await propRes.json();
+                document.getElementById('job-property-select').innerHTML = propData.items.map(p =>
+                    `<option value="${p.id}">${p.name}</option>`
+                ).join('');
+
+                const statusColors = {
+                    'pending': 'secondary',
+                    'offered': 'info',
+                    'confirmed': 'primary',
+                    'in_progress': 'warning',
+                    'completed': 'success',
+                    'escalated': 'danger'
+                };
+
+                const tbody = document.getElementById('jobs-table');
+                tbody.innerHTML = data.items.map(j => `
+                    <tr>
+                        <td>${j.property_name || 'N/A'}</td>
+                        <td>${j.job_type}</td>
+                        <td>${new Date(j.scheduled_date).toLocaleDateString()}</td>
+                        <td>${j.cleaner_name || '-'}</td>
+                        <td><span class="badge bg-${statusColors[j.status] || 'secondary'}">${j.status}</span></td>
+                        <td>
+                            ${j.status === 'pending' ? `<button class="btn btn-sm btn-outline-primary" onclick="assignJob(${j.id})">Assign</button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error loading jobs:', err);
+            }
+        }
+
+        async function loadGuests() {
+            try {
+                const res = await fetch(API_BASE + '/guests/');
+                const data = await res.json();
+
+                // Also load properties for the guest modal
+                const propRes = await fetch(API_BASE + '/properties/');
+                const propData = await propRes.json();
+                document.getElementById('guest-property-select').innerHTML = propData.items.map(p =>
+                    `<option value="${p.id}">${p.name}</option>`
+                ).join('');
+
+                const tbody = document.getElementById('guests-table');
+                tbody.innerHTML = data.items.map(g => `
+                    <tr>
+                        <td>${g.name}</td>
+                        <td>${g.property_name || 'N/A'}</td>
+                        <td>${new Date(g.check_in_date).toLocaleDateString()}</td>
+                        <td>${new Date(g.check_out_date).toLocaleDateString()}</td>
+                        <td><span class="badge bg-info">${g.status}</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error loading guests:', err);
+            }
+        }
+
+        async function loadOffers() {
+            try {
+                const res = await fetch(API_BASE + '/admin/pending-offers');
+                const data = await res.json();
+
+                const tbody = document.getElementById('offers-table');
+                tbody.innerHTML = data.items.map(o => `
+                    <tr>
+                        <td>${o.cleaner_name}</td>
+                        <td>${o.property_name}</td>
+                        <td>${new Date(o.scheduled_date).toLocaleDateString()}</td>
+                        <td>${o.hours_pending.toFixed(1)}h</td>
+                        <td>${o.reminder_count}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger" onclick="cancelOffer(${o.id})">Cancel</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error loading offers:', err);
+            }
+        }
+
+        async function saveProperty() {
+            const form = document.getElementById('propertyForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            data.bedrooms = parseInt(data.bedrooms);
+            data.bathrooms = parseFloat(data.bathrooms);
+            data.standard_cleaning_rate = parseFloat(data.standard_cleaning_rate);
+
+            try {
+                const res = await fetch(API_BASE + '/properties/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('propertyModal')).hide();
+                    form.reset();
+                    loadProperties();
+                }
+            } catch (err) {
+                console.error('Error saving property:', err);
+            }
+        }
+
+        async function saveCleaner() {
+            const form = document.getElementById('cleanerForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            try {
+                const res = await fetch(API_BASE + '/cleaners/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('cleanerModal')).hide();
+                    form.reset();
+                    loadCleaners();
+                }
+            } catch (err) {
+                console.error('Error saving cleaner:', err);
+            }
+        }
+
+        async function saveJob() {
+            const form = document.getElementById('jobForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            data.property_id = parseInt(data.property_id);
+
+            try {
+                const res = await fetch(API_BASE + '/jobs/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('jobModal')).hide();
+                    form.reset();
+                    loadJobs();
+                }
+            } catch (err) {
+                console.error('Error saving job:', err);
+            }
+        }
+
+        async function saveGuest() {
+            const form = document.getElementById('guestForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            data.property_id = parseInt(data.property_id);
+
+            try {
+                const res = await fetch(API_BASE + '/guests/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('guestModal')).hide();
+                    form.reset();
+                    loadGuests();
+                }
+            } catch (err) {
+                console.error('Error saving guest:', err);
+            }
+        }
+
+        async function assignJob(jobId) {
+            try {
+                const res = await fetch(API_BASE + `/admin/jobs/${jobId}/assign`, { method: 'POST' });
+                if (res.ok) {
+                    loadJobs();
+                    alert('Job assigned successfully!');
+                } else {
+                    const err = await res.json();
+                    alert('Failed to assign: ' + (err.detail || 'Unknown error'));
+                }
+            } catch (err) {
+                console.error('Error assigning job:', err);
+            }
+        }
+
+        async function cancelOffer(offerId) {
+            if (!confirm('Cancel this offer?')) return;
+            try {
+                const res = await fetch(API_BASE + `/admin/offers/${offerId}/cancel`, { method: 'POST' });
+                if (res.ok) {
+                    loadOffers();
+                }
+            } catch (err) {
+                console.error('Error canceling offer:', err);
+            }
+        }
+
+        // Initial load
+        loadDashboard();
+    </script>
+</body>
+</html>
